@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OLLAMA Chat Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background-color: #2a2a2a;
+            padding: 16px 20px;
+            border-bottom: 1px solid #404040;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .model-selector {
+            background: #404040;
+            border: 1px solid #555555;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 12px;
+            cursor: pointer;
+            min-width: 120px;
+        }
+
+        .model-selector:focus {
+            outline: none;
+            border-color: #10a37f;
+        }
+
+        .toggle-button {
+            background: #404040;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .toggle-button:hover {
+            background: #505050;
+        }
+
+        .toggle-button.active {
+            background: #10a37f;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 768px;
+            margin: 0 auto;
+            width: 100%;
+            padding: 0 20px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .message {
+            display: flex;
+            gap: 16px;
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .user .message-avatar {
+            background: #10a37f;
+            color: white;
+        }
+
+        .assistant .message-avatar {
+            background: #ab68ff;
+            color: white;
+        }
+
+        .message-content {
+            flex: 1;
+            line-height: 1.6;
+            padding: 8px 0;
+        }
+
+        .input-area {
+            padding: 20px 0;
+            border-top: 1px solid #404040;
+        }
+
+        .input-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .control-button {
+            background: #2a2a2a;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-button:hover {
+            background: #3a3a3a;
+            border-color: #505050;
+        }
+
+        .control-button.active {
+            background: #10a37f;
+            border-color: #10a37f;
+        }
+
+        .input-container {
+            position: relative;
+            background: #2a2a2a;
+            border: 1px solid #404040;
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+        }
+
+        .input-container:focus-within {
+            border-color: #10a37f;
+        }
+
+        .message-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #ffffff;
+            font-size: 16px;
+            resize: none;
+            min-height: 24px;
+            max-height: 120px;
+            font-family: inherit;
+        }
+
+        .message-input::placeholder {
+            color: #8e8ea0;
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-button, .send-button {
+            background: #404040;
+            border: none;
+            border-radius: 6px;
+            padding: 8px;
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-button:hover {
+            background: #505050;
+        }
+
+        .send-button {
+            background: #10a37f;
+        }
+
+        .send-button:hover {
+            background: #0d8a6b;
+        }
+
+        .send-button:disabled {
+            background: #404040;
+            cursor: not-allowed;
+        }
+
+        .file-preview {
+            margin-top: 8px;
+            padding: 8px;
+            background: #404040;
+            border-radius: 6px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .remove-file {
+            background: none;
+            border: none;
+            color: #ff6b6b;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: #2a2a2a;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .status-indicator.show {
+            opacity: 1;
+        }
+
+        .memory-button {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .header-controls {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            
+            .input-controls {
+                justify-content: center;
+            }
+            
+            .control-button {
+                font-size: 11px;
+                padding: 6px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>OLLAMA Chat Interface</h1>
+        <div class="header-controls">
+            <select class="model-selector" id="modelSelector">
+                <option value="llama3.2">Llama 3.2</option>
+                <option value="llama3.1">Llama 3.1</option>
+                <option value="llama3">Llama 3</option>
+                <option value="mistral">Mistral</option>
+                <option value="codellama">CodeLlama</option>
+                <option value="phi3">Phi-3</option>
+                <option value="gemma2">Gemma 2</option>
+            </select>
+            <button class="toggle-button" id="ragToggle">RAG Mode: OFF</button>
+            <button class="toggle-button" id="deepResearchToggle">Deep Research: OFF</button>
+        </div>
+    </div>
+
+    <div class="memory-button" id="memoryButton" title="Memory">
+        🧠
+    </div>
+
+    <div class="status-indicator" id="statusIndicator">
+        Ready
+    </div>
+
+    <div class="chat-container">
+        <div class="messages" id="messages">
+            <div class="message assistant">
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    Hello! I'm your OLLAMA-powered assistant. I can help you with web searches, deep research, analyze uploaded files and images, and maintain conversation memory. How can I assist you today?
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-controls">
+                <button class="control-button" id="webSearchBtn">
+                    🔍 Web Search
+                </button>
+                <button class="control-button" id="imageBtn">
+                    🖼️ Upload Image
+                </button>
+                <button class="control-button" id="fileBtn">
+                    📁 Upload File
+                </button>
+            </div>
+
+            <div class="input-container">
+                <textarea 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="Message OLLAMA Chat..."
+                    rows="1"
+                ></textarea>
+                <div class="input-actions">
+                    <input type="file" class="file-input" id="imageInput" accept="image/*">
+                    <input type="file" class="file-input" id="fileInput" accept=".pdf,.doc,.docx,.txt,.csv,.json">
+                    <button class="send-button" id="sendButton" disabled>
+                        ➤
+                    </button>
+                </div>
+            </div>
+            <div id="filePreview" class="file-preview" style="display: none;">
+                <span id="fileName"></span>
+                <button class="remove-file" id="removeFile">✕</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        let state = {
+            ragMode: false,
+            deepResearch: false,
+            webSearch: false,
+            currentFile: null,
+            selectedModel: 'llama3.2',
+            messages: []
+        };
+
+        // DOM elements
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const messages = document.getElementById('messages');
+        const ragToggle = document.getElementById('ragToggle');
+        const deepResearchToggle = document.getElementById('deepResearchToggle');
+        const webSearchBtn = document.getElementById('webSearchBtn');
+        const imageBtn = document.getElementById('imageBtn');
+        const fileBtn = document.getElementById('fileBtn');
+        const imageInput = document.getElementById('imageInput');
+        const fileInput = document.getElementById('fileInput');
+        const filePreview = document.getElementById('filePreview');
+        const fileName = document.getElementById('fileName');
+        const removeFile = document.getElementById('removeFile');
+        const modelSelector = document.getElementById('modelSelector');
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        // Event listeners
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+            sendButton.disabled = !this.value.trim() && !state.currentFile;
+        });
+
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        sendButton.addEventListener('click', sendMessage);
+
+        ragToggle.addEventListener('click', function() {
+            state.ragMode = !state.ragMode;
+            this.textContent = `RAG Mode: ${state.ragMode ? 'ON' : 'OFF'}`;
+            this.classList.toggle('active', state.ragMode);
+            showStatus(`RAG Mode ${state.ragMode ? 'enabled' : 'disabled'}`);
+        });
+
+        deepResearchToggle.addEventListener('click', function() {
+            state.deepResearch = !state.deepResearch;
+            this.textContent = `Deep Research: ${state.deepResearch ? 'ON' : 'OFF'}`;
+            this.classList.toggle('active', state.deepResearch);
+            showStatus(`Deep Research ${state.deepResearch ? 'enabled' : 'disabled'}`);
+        });
+
+        webSearchBtn.addEventListener('click', function() {
+            state.webSearch = !state.webSearch;
+            this.classList.toggle('active', state.webSearch);
+            showStatus(`Web Search ${state.webSearch ? 'enabled' : 'disabled'}`);
+        });
+
+        imageBtn.addEventListener('click', () => imageInput.click());
+        fileBtn.addEventListener('click', () => fileInput.click());
+
+        imageInput.addEventListener('change', handleFileSelect);
+        fileInput.addEventListener('change', handleFileSelect);
+
+        removeFile.addEventListener('click', function() {
+            state.currentFile = null;
+            filePreview.style.display = 'none';
+            imageInput.value = '';
+            fileInput.value = '';
+            sendButton.disabled = !messageInput.value.trim();
+        });
+
+        modelSelector.addEventListener('change', function() {
+            state.selectedModel = this.value;
+            showStatus(`Model changed to: ${this.options[this.selectedIndex].text}`);
+        });
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                state.currentFile = file;
+                fileName.textContent = file.name;
+                filePreview.style.display = 'flex';
+                sendButton.disabled = false;
+                showStatus(`File selected: ${file.name}`);
+            }
+        }
+
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text && !state.currentFile) return;
+
+            // Add user message
+            addMessage('user', text || `[File: ${state.currentFile.name}]`);
+
+            // Clear input
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            sendButton.disabled = true;
+
+            // Show typing indicator
+            showStatus('Processing...');
+
+            // Simulate API call
+            setTimeout(() => {
+                const response = generateResponse(text);
+                addMessage('assistant', response);
+                showStatus('Ready');
+            }, 1000 + Math.random() * 2000);
+
+            // Clear file after sending
+            if (state.currentFile) {
+                state.currentFile = null;
+                filePreview.style.display = 'none';
+                imageInput.value = '';
+                fileInput.value = '';
+            }
+        }
+
+        function addMessage(role, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">${role === 'user' ? 'You' : 'AI'}</div>
+                <div class="message-content">${content}</div>
+            `;
+            
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+            
+            state.messages.push({ role, content });
+        }
+
+        function generateResponse(userMessage) {
+            let response = "I understand your request. ";
+            
+            if (state.webSearch) {
+                response += "I'll search the web for relevant information. ";
+            }
+            
+            if (state.deepResearch) {
+                response += "I'll perform deep research on this topic. ";
+            }
+            
+            if (state.ragMode) {
+                response += "All search results and file content will be added to my context using RAG. ";
+            }
+            
+            if (state.currentFile) {
+                response += "I'll analyze the uploaded file. ";
+            }
+            
+            response += "This is a simulated response from the OLLAMA model. In the actual implementation, this would be processed by your FastAPI backend using LangChain and LangGraph.";
+            
+            return response;
+        }
+
+        function showStatus(message) {
+            statusIndicator.textContent = message;
+            statusIndicator.classList.add('show');
+            setTimeout(() => {
+                statusIndicator.classList.remove('show');
+            }, 3000);
+        }
+
+        // Initialize
+        showStatus('OLLAMA Chat Interface Ready');
+    </script>
+</body>
+</html>

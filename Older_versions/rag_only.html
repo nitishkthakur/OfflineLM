@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG Interface</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- htmx -->
+  <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+  <style>
+    body, html { height: 100%; margin: 0; }
+    .grid-container {
+      display: grid;
+      grid-template-columns: 15% 70% 15%;
+      height: 100%;
+    }
+    .panel { overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <div class="grid-container">
+
+    <!-- Left Panel: History -->
+    <div class="panel bg-light p-3">
+      <h5>History</h5>
+      <ul class="list-group" id="history-list" 
+          hx-get="/api/chats" 
+          hx-trigger="load"
+          hx-target="#history-list"
+          hx-swap="innerHTML">
+        <!-- Filled by backend: <li> items with hx-get to load chat -->
+      </ul>
+    </div>
+
+    <!-- Center Panel: Chat -->
+    <div class="panel d-flex flex-column p-3">
+      <div class="d-flex mb-2">
+        <button class="btn btn-outline-primary me-2"
+                hx-post="/api/rag/search"
+                hx-trigger="click"
+                hx-target="#chat-window"
+                hx-swap="afterbegin">
+          Search
+        </button>
+
+        <label class="btn btn-outline-secondary me-2">
+          Upload File
+          <input type="file" hidden
+                 hx-post="/api/rag/upload"
+                 hx-include="this"
+                 hx-trigger="change"
+                 hx-target="#chat-window"
+                 hx-swap="afterbegin">
+        </label>
+
+        <div class="input-group w-auto">
+          <span class="input-group-text">Iterations</span>
+          <input type="number" class="form-control"
+                 id="iterations" name="iterations"
+                 value="3"
+                 hx-post="/api/rag/config"
+                 hx-trigger="change"
+                 hx-include="#iterations"
+                 hx-target="body"
+                 hx-swap="none">
+        </div>
+      </div>
+
+      <div id="chat-window" class="flex-fill border rounded p-3 mb-2 overflow-auto">
+        <!-- Chat messages injected here -->
+      </div>
+
+      <form hx-post="/api/rag/message" hx-target="#chat-window" hx-swap="beforeend" class="d-flex">
+        <textarea class="form-control me-2" name="message" rows="2" placeholder="Type your message..."></textarea>
+        <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+    </div>
+
+    <!-- Right Panel: RAG Settings -->
+    <div class="panel bg-light p-3">
+      <h5>RAG Settings</h5>
+      <form id="settings-form" hx-post="/api/rag/settings" hx-trigger="change from:#settings-form" hx-swap="none">
+        <div class="mb-3">
+          <label class="form-label">Retriever Type</label>
+          <select name="retriever" class="form-select">
+            <option value="bm25">BM25</option>
+            <option value="embedding">Embedding</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Context Size</label>
+          <input type="number" name="context_size" class="form-control" value="500" min="100" max="2000">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Top-k Results</label>
+          <input type="number" name="top_k" class="form-control" value="5" min="1" max="20">
+        </div>
+        <button type="submit" class="btn btn-success w-100">Apply Settings</button>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- Bootstrap JS bundle (for optional dropdowns/modals) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

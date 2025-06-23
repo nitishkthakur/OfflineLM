@@ -1,0 +1,31 @@
+# ─── Django core ────────────────────────────────────────
+Django>=4.2,<5.0
+django-environ
+djangorestframework
+
+# ─── Database driver ────────────────────────────────────
+psycopg2-binary
+
+# ─── Hugging Face LLM & hub ────────────────────────────
+transformers>=4.30.0
+huggingface-hub>=0.14.1
+
+# ─── Diffusion/image pipelines ─────────────────────────
+diffusers>=0.19.0
+safetensors
+
+# ─── CPU-only PyTorch ──────────────────────────────────
+# Install the CPU-only build of torch:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Then the version constraint here will pick up that CPU build.
+torch>=2.0.0
+
+# ─── Image handling ─────────────────────────────────────
+Pillow>=9.0
+
+# ─── Data validation & structured outputs ──────────────
+pydantic>=2.0.0
+langchain>=0.0.330
+
+# ─── CORS for API (if needed) ──────────────────────────
+django-cors-headers>=3.14.0
