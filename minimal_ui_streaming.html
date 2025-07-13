@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Chat Interface - Streaming</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+    <!-- Markdown rendering with syntax highlighting -->
+    <script src="https://unpkg.com/marked@12.0.0/marked.min.js"></script>
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Calibri', Arial, sans-serif;
+            background-color: #2d2d2d;
+            color: #ffffff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .main-container {
+            display: flex;
+            height: 100vh;
+            max-width: 1610px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            flex: 1;
+            min-width: 0; /* Allows flex item to shrink */
+        }
+        
+        .config-sidebar {
+            width: 300px;
+            background-color: #1a1a1a;
+            border-left: 1px solid #404040;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+        
+        .config-header {
+            padding: 20px;
+            border-bottom: 1px solid #404040;
+            text-align: center;
+        }
+        
+        .config-header h2 {
+            font-size: 18px;
+            font-weight: 300;
+            margin: 0;
+        }
+        
+        .config-content {
+            padding: 20px;
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .config-section {
+            margin-bottom: 25px;
+        }
+        
+        .config-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #cccccc;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .model-selector {
+            width: 100%;
+            background-color: #404040;
+            border: 1px solid #555555;
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #ffffff;
+            font-size: 14px;
+            font-family: 'Calibri', Arial, sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+            cursor: pointer;
+        }
+        
+        .model-selector:focus {
+            border-color: #0084ff;
+        }
+        
+        .model-selector option {
+            background-color: #404040;
+            color: #ffffff;
+        }
+        
+        .model-info {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #aaaaaa;
+            line-height: 1.4;
+        }
+        
+        .config-stats {
+            background-color: #333333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .config-stats h4 {
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #cccccc;
+            text-transform: uppercase;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .stat-label {
+            color: #aaaaaa;
+        }
+        
+        .stat-value {
+            color: #ffffff;
+            font-weight: 500;
+        }
+        
+        /* Toggle button for mobile */
+        .config-toggle {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #0084ff;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            color: white;
+            cursor: pointer;
+            z-index: 1000;
+            font-size: 20px;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+            
+            .config-sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 40vh;
+                border-left: none;
+                border-top: 1px solid #404040;
+                order: 2;
+            }
+            
+            .chat-container {
+                order: 1;
+                height: 60vh;
+            }
+            
+            .config-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+        
+        .chat-header {
+            background-color: #1a1a1a;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid #404040;
+        }
+        
+        .chat-header h1 {
+            font-size: 24px;
+            font-weight: 300;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        .message.user {
+            background-color: #0084ff;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        
+        .message.assistant {
+            background-color: #404040;
+            color: #ffffff;
+            align-self: flex-start;
+            border: 1px solid #555555;
+        }
+        
+        /* Streaming indicator */
+        .message.streaming::after {
+            content: '▌';
+            animation: blink 1s ease-in-out infinite;
+            color: #0084ff;
+            margin-left: 2px;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        
+        /* Markdown styling for assistant messages */
+        .message.assistant h1, .message.assistant h2, .message.assistant h3, 
+        .message.assistant h4, .message.assistant h5, .message.assistant h6 {
+            margin: 0.5em 0;
+            color: #ffffff;
+        }
+        
+        .message.assistant h1 { font-size: 1.4em; font-weight: bold; }
+        .message.assistant h2 { font-size: 1.3em; font-weight: bold; }
+        .message.assistant h3 { font-size: 1.2em; font-weight: bold; }
+        
+        .message.assistant p {
+            margin: 0.5em 0;
+            line-height: 1.5;
+        }
+        
+        .message.assistant ul, .message.assistant ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+        
+        .message.assistant li {
+            margin: 0.2em 0;
+            line-height: 1.4;
+        }
+        
+        .message.assistant code {
+            background-color: #2d2d2d;
+            color: #f8f8f2;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+        
+        .message.assistant pre {
+            background-color: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 1em;
+            margin: 0.5em 0;
+            overflow-x: auto;
+        }
+        
+        .message.assistant pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }
+        
+        .message.assistant blockquote {
+            border-left: 4px solid #0084ff;
+            margin: 0.5em 0;
+            padding-left: 1em;
+            font-style: italic;
+            background-color: rgba(0, 132, 255, 0.1);
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .message.assistant strong {
+            font-weight: bold;
+            color: #ffffff;
+        }
+        
+        .message.assistant em {
+            font-style: italic;
+        }
+        
+        .message.assistant table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.5em 0;
+        }
+        
+        .message.assistant th, .message.assistant td {
+            border: 1px solid #555555;
+            padding: 0.4em 0.8em;
+            text-align: left;
+        }
+        
+        .message.assistant th {
+            background-color: #2d2d2d;
+            font-weight: bold;
+        }
+        
+        .message.loading {
+            background-color: #404040;
+            color: #aaaaaa;
+            align-self: flex-start;
+            border: 1px solid #555555;
+        }
+        
+        .loading-dots {
+            display: inline-block;
+        }
+        
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .chat-input-container {
+            background-color: #1a1a1a;
+            padding: 20px;
+            border-top: 1px solid #404040;
+        }
+        
+        .chat-input-form {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .chat-input {
+            flex: 1;
+            background-color: #404040;
+            border: 1px solid #555555;
+            border-radius: 25px;
+            padding: 12px 20px;
+            color: #ffffff;
+            font-size: 16px;
+            font-family: 'Calibri', Arial, sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .chat-input:focus {
+            border-color: #0084ff;
+        }
+        
+        .chat-input::placeholder {
+            color: #aaaaaa;
+        }
+        
+        .send-button {
+            background-color: #0084ff;
+            border: none;
+            border-radius: 50%;
+            width: 45px;
+            height: 45px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+            font-size: 18px;
+        }
+        
+        .send-button:hover:not(:disabled) {
+            background-color: #0066cc;
+        }
+        
+        .send-button:disabled {
+            background-color: #666666;
+            cursor: not-allowed;
+        }
+        
+        .clear-button {
+            background-color: #666666;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            color: white;
+            cursor: pointer;
+            font-family: 'Calibri', Arial, sans-serif;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .clear-button:hover {
+            background-color: #777777;
+        }
+        
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 16px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-track {
+            background: #2d2d2d;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #555555;
+            border-radius: 4px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #666666;
+        }
+        
+        .status-indicator {
+            text-align: center;
+            color: #aaaaaa;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <button class="config-toggle" onclick="toggleConfig()">⚙️</button>
+    
+    <div class="main-container">
+        <div class="chat-container" x-data="streamingChatApp()">
+            <div class="chat-header">
+                <h1>🤖 Streaming Chat Interface</h1>
+            </div>
+            
+            <div class="chat-messages" id="chat-messages" x-ref="chatMessages">
+                <template x-for="message in messages" :key="message.id">
+                    <div class="message" :class="[message.type, message.streaming ? 'streaming' : '']">
+                        <span x-html="message.content"></span>
+                    </div>
+                </template>
+                
+                <!-- Loading message -->
+                <div x-show="isLoading" class="message loading">
+                    <span class="loading-dots">Thinking</span>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <div class="status-indicator" x-text="statusMessage"></div>
+                <form class="chat-input-form" @submit.prevent="sendMessage">
+                    <input 
+                        type="text" 
+                        class="chat-input" 
+                        placeholder="Type your message..."
+                        x-model="currentMessage"
+                        :disabled="isLoading"
+                        autocomplete="off"
+                        @keydown.enter="sendMessage">
+                    
+                    <button type="submit" class="send-button" :disabled="isLoading || !currentMessage.trim()">
+                        <span x-show="!isLoading">➤</span>
+                        <span x-show="isLoading" class="loading-dots"></span>
+                    </button>
+                    
+                    <button type="button" class="clear-button" @click="clearChat" :disabled="isLoading">
+                        Clear
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="config-sidebar" x-data="configPanel()">
+            <div class="config-header">
+                <h2>⚙️ Configuration</h2>
+            </div>
+            
+            <div class="config-content">
+                <div class="config-section">
+                    <h3>Model Selection</h3>
+                    <select 
+                        class="model-selector" 
+                        x-model="selectedModel" 
+                        @change="changeModel"
+                        :disabled="isLoadingModels">
+                        <template x-for="model in availableModels" :key="model.name">
+                            <option :value="model.name" x-text="model.name"></option>
+                        </template>
+                    </select>
+                    <div class="model-info">
+                        <span x-show="isLoadingModels">Loading models...</span>
+                        <span x-show="!isLoadingModels && selectedModelInfo">
+                            <strong x-text="selectedModelInfo.name"></strong><br>
+                            Size: <span x-text="selectedModelInfo.size"></span><br>
+                            Modified: <span x-text="selectedModelInfo.modified_at"></span>
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <div class="config-stats">
+                        <h4>Chat Statistics</h4>
+                        <div class="stat-item">
+                            <span class="stat-label">Messages:</span>
+                            <span class="stat-value" x-text="chatStats.messageCount"></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Current Model:</span>
+                            <span class="stat-value" x-text="chatStats.currentModel"></span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Status:</span>
+                            <span class="stat-value" x-text="chatStats.status"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function streamingChatApp() {
+            return {
+                messages: [],
+                currentMessage: '',
+                isLoading: false,
+                messageId: 0,
+                statusMessage: 'Ready to chat!',
+                currentEventSource: null,
+                
+                init() {
+                    // Configure marked.js with highlight.js
+                    marked.setOptions({
+                        highlight: function(code, lang) {
+                            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                            return hljs.highlight(code, { language }).value;
+                        },
+                        breaks: true,
+                        gfm: true,
+                        tables: true,
+                        sanitize: false
+                    });
+                    
+                    // Make this instance globally accessible
+                    Alpine.store('chatApp', this);
+                    window.chatAppInstance = this;
+                    
+                    // Load existing messages on page load
+                    this.loadMessages();
+                },
+                
+                async loadMessages() {
+                    try {
+                        const response = await fetch('/messages');
+                        const data = await response.json();
+                        this.messages = data.messages.map((msg, index) => ({
+                            id: index,
+                            type: msg.type,
+                            content: this.formatMessage(msg.content),
+                            streaming: false
+                        }));
+                        this.messageId = this.messages.length;
+                        this.$nextTick(() => this.scrollToBottom());
+                    } catch (error) {
+                        console.error('Error loading messages:', error);
+                        this.statusMessage = 'Error loading messages';
+                    }
+                },
+                
+                formatMessage(content) {
+                    try {
+                        let html = marked.parse(content);
+                        setTimeout(() => {
+                            document.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        }, 0);
+                        return html;
+                    } catch (error) {
+                        console.error('Error parsing markdown:', error);
+                        return content
+                            .replace(/\n/g, '<br>')
+                            .replace(/  /g, '&nbsp;&nbsp;')
+                            .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+                    }
+                },
+                
+                async sendMessage() {
+                    if (!this.currentMessage.trim() || this.isLoading) return;
+                    
+                    const userMessage = this.currentMessage;
+                    this.currentMessage = '';
+                    
+                    // Close any existing EventSource
+                    if (this.currentEventSource) {
+                        this.currentEventSource.close();
+                        this.currentEventSource = null;
+                    }
+                    
+                    // Add user message
+                    this.addMessage('user', userMessage, false);
+                    
+                    // Start streaming response
+                    this.isLoading = true;
+                    this.statusMessage = 'Sending message...';
+                    
+                    // Add empty assistant message for streaming
+                    const assistantMessageId = this.messageId;
+                    this.addMessage('assistant', '', true);
+                    
+                    try {
+                        // Create EventSource for streaming
+                        const currentModel = Alpine.store('configPanel')?.selectedModel || 
+                                           window.configPanelInstance?.selectedModel || 
+                                           'qwen2.5:7b';
+                        console.log('Using model for streaming:', currentModel);
+                        const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}`);
+                        this.currentEventSource = eventSource;
+                        
+                        eventSource.onopen = () => {
+                            this.statusMessage = 'Connected, waiting for response...';
+                        };
+                        
+                        eventSource.onmessage = (event) => {
+                            try {
+                                const data = JSON.parse(event.data);
+                                
+                                if (data.type === 'chunk' && data.content) {
+                                    // Find the assistant message and append content
+                                    const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                                    if (assistantMsg) {
+                                        // Append raw content first, then format
+                                        const currentRawContent = assistantMsg.rawContent || '';
+                                        assistantMsg.rawContent = currentRawContent + data.content;
+                                        assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                                    }
+                                    this.statusMessage = 'Streaming response...';
+                                    this.$nextTick(() => this.scrollToBottom());
+                                    
+                                } else if (data.type === 'done') {
+                                    const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                                    if (assistantMsg) {
+                                        assistantMsg.streaming = false;
+                                    }
+                                    eventSource.close();
+                                    this.currentEventSource = null;
+                                    this.isLoading = false;
+                                    this.statusMessage = 'Response complete';
+                                    setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                                    
+                                    // Return focus to the input box after streaming is complete
+                                    this.$nextTick(() => {
+                                        const inputElement = document.querySelector('.chat-input');
+                                        if (inputElement) {
+                                            inputElement.focus();
+                                        }
+                                    });
+                                    
+                                } else if (data.type === 'error') {
+                                    const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                                    if (assistantMsg) {
+                                        assistantMsg.content = '❌ Error: ' + data.message;
+                                        assistantMsg.streaming = false;
+                                    }
+                                    eventSource.close();
+                                    this.currentEventSource = null;
+                                    this.isLoading = false;
+                                    this.statusMessage = 'Error occurred';
+                                    
+                                    // Return focus to input box on error
+                                    this.$nextTick(() => {
+                                        const inputElement = document.querySelector('.chat-input');
+                                        if (inputElement) {
+                                            inputElement.focus();
+                                        }
+                                    });
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e);
+                            }
+                        };
+                        
+                        eventSource.onerror = (event) => {
+                            console.error('EventSource error:', event);
+                            const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                            if (assistantMsg) {
+                                assistantMsg.content = '❌ Connection error. Please try again.';
+                                assistantMsg.streaming = false;
+                            }
+                            eventSource.close();
+                            this.currentEventSource = null;
+                            this.isLoading = false;
+                            this.statusMessage = 'Connection error';
+                            
+                            // Return focus to input box on connection error
+                            this.$nextTick(() => {
+                                const inputElement = document.querySelector('.chat-input');
+                                if (inputElement) {
+                                    inputElement.focus();
+                                }
+                            });
+                        };
+                        
+                        // Timeout fallback
+                        setTimeout(() => {
+                            if (this.currentEventSource && this.currentEventSource.readyState === EventSource.CONNECTING) {
+                                eventSource.close();
+                                const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                                if (assistantMsg) {
+                                    assistantMsg.content = '⏱️ Request timeout. Please try again.';
+                                    assistantMsg.streaming = false;
+                                }
+                                this.currentEventSource = null;
+                                this.isLoading = false;
+                                this.statusMessage = 'Request timeout';
+                                
+                                // Return focus to input box on timeout
+                                this.$nextTick(() => {
+                                    const inputElement = document.querySelector('.chat-input');
+                                    if (inputElement) {
+                                        inputElement.focus();
+                                    }
+                                });
+                            }
+                        }, 60000); // 60 second timeout
+                        
+                    } catch (error) {
+                        console.error('Error setting up streaming:', error);
+                        const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                        if (assistantMsg) {
+                            assistantMsg.content = '❌ Failed to start streaming. Please try again.';
+                            assistantMsg.streaming = false;
+                        }
+                        this.isLoading = false;
+                        this.statusMessage = 'Failed to start streaming';
+                        
+                        // Return focus to input box on setup error
+                        this.$nextTick(() => {
+                            const inputElement = document.querySelector('.chat-input');
+                            if (inputElement) {
+                                inputElement.focus();
+                            }
+                        });
+                    }
+                },
+                
+                addMessage(type, content, streaming = false) {
+                    this.messages.push({
+                        id: this.messageId++,
+                        type: type,
+                        content: this.formatMessage(content),
+                        rawContent: content,
+                        streaming: streaming
+                    });
+                    this.$nextTick(() => this.scrollToBottom());
+                },
+                
+                async clearChat() {
+                    try {
+                        await fetch('/clear', { method: 'POST' });
+                        this.messages = [];
+                        this.messageId = 0;
+                        this.statusMessage = 'Chat cleared';
+                        setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                    } catch (error) {
+                        console.error('Error clearing chat:', error);
+                        this.statusMessage = 'Error clearing chat';
+                    }
+                },
+                
+                scrollToBottom() {
+                    const chatMessages = this.$refs.chatMessages;
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                },
+                
+                // Expose method to change model from config panel
+                changeModel(newModel) {
+                    this.statusMessage = `Switching to ${newModel}...`;
+                    // Model change is handled by the config panel
+                    setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                }
+            }
+        }
+        
+        function configPanel() {
+            return {
+                availableModels: [],
+                selectedModel: 'qwen2.5:7b', // Default model
+                selectedModelInfo: null,
+                isLoadingModels: false,
+                chatStats: {
+                    messageCount: 0,
+                    currentModel: 'qwen2.5:7b',
+                    status: 'Ready'
+                },
+                
+                init() {
+                    // Store this instance globally for access from chat app
+                    Alpine.store('configPanel', this);
+                    window.configPanelInstance = this;
+                    
+                    this.loadAvailableModels();
+                    this.updateStats();
+                },
+                
+                async loadAvailableModels() {
+                    this.isLoadingModels = true;
+                    try {
+                        const response = await fetch('/models');
+                        const data = await response.json();
+                        this.availableModels = data.models || [];
+                        
+                        // Set selected model info
+                        this.selectedModelInfo = this.availableModels.find(model => model.name === this.selectedModel);
+                        this.chatStats.currentModel = this.selectedModel;
+                    } catch (error) {
+                        console.error('Error loading models:', error);
+                        // Fallback models if API fails
+                        this.availableModels = [
+                            { name: 'qwen2.5:7b', size: '4.7GB', modified_at: 'Recently' },
+                            { name: 'gemma3:4b-it-fp16', size: '2.4GB', modified_at: 'Recently' },
+                            { name: 'llama3.2:3b', size: '2.0GB', modified_at: 'Recently' }
+                        ];
+                        this.selectedModelInfo = this.availableModels[0];
+                    } finally {
+                        this.isLoadingModels = false;
+                    }
+                },
+                
+                async changeModel() {
+                    console.log('changeModel called with:', this.selectedModel);
+                    try {
+                        // Update selected model info
+                        this.selectedModelInfo = this.availableModels.find(model => model.name === this.selectedModel);
+                        this.chatStats.currentModel = this.selectedModel;
+                        this.chatStats.status = 'Model Changing...';
+                        
+                        console.log('Attempting to change model to:', this.selectedModel);
+                        
+                        // Send model change to backend with conversation history
+                        const chatApp = Alpine.store('chatApp') || window.chatAppInstance;
+                        if (chatApp) {
+                            const conversationHistory = chatApp.messages.map(msg => ({
+                                role: msg.type === 'user' ? 'user' : 'assistant',
+                                content: msg.rawContent || msg.content.replace(/<[^>]*>/g, '') // Strip HTML for raw content
+                            }));
+                            
+                            console.log('Sending model change request with history length:', conversationHistory.length);
+                            
+                            const response = await fetch('/change-model', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    model: this.selectedModel,
+                                    conversation_history: conversationHistory
+                                })
+                            });
+                            
+                            const result = await response.json();
+                            console.log('Model change response:', result);
+                            
+                            // Notify chat app about model change
+                            if (chatApp.changeModel) {
+                                chatApp.changeModel(this.selectedModel);
+                            }
+                        } else {
+                            console.error('Chat app not found');
+                        }
+                        
+                        this.chatStats.status = 'Model Changed';
+                        setTimeout(() => this.chatStats.status = 'Ready', 2000);
+                    } catch (error) {
+                        console.error('Error changing model:', error);
+                        this.chatStats.status = 'Error';
+                    }
+                },
+                
+                updateStats() {
+                    // Update stats periodically
+                    setInterval(() => {
+                        const chatApp = Alpine.store('chatApp') || window.chatAppInstance;
+                        if (chatApp) {
+                            this.chatStats.messageCount = chatApp.messages.length;
+                            if (chatApp.isLoading) {
+                                this.chatStats.status = 'Processing...';
+                            } else if (this.chatStats.status === 'Processing...') {
+                                this.chatStats.status = 'Ready';
+                            }
+                        }
+                    }, 1000);
+                }
+            }
+        }
+        
+        // Mobile config toggle
+        function toggleConfig() {
+            const sidebar = document.querySelector('.config-sidebar');
+            if (sidebar) {
+                sidebar.style.display = sidebar.style.display === 'none' ? 'flex' : 'none';
+            }
+        }
+        
+        // Make chat app globally accessible for config panel
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('chatApp', null);
+        });
+    </script>
+</body>
+</html>

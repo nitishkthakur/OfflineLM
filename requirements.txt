@@ -1,7 +1,0 @@
-ollama
-langchain
-langchain-community
-transformers
-accelerate
-
-
