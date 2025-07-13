@@ -464,7 +464,7 @@
     <div class="main-container">
         <div class="chat-container" x-data="streamingChatApp()">
             <div class="chat-header">
-                <h1>🤖 Streaming Chat Interface</h1>
+                <h1>Streaming Chat Interface</h1>
             </div>
             
             <div class="chat-messages" id="chat-messages" x-ref="chatMessages">
@@ -586,7 +586,7 @@
                 async loadMessages() {
                     try {
                         const response = await fetch('/messages');
-                        const data = await response.json();
+                        const data = await responWhat ios thisse.json();
                         this.messages = data.messages.map((msg, index) => ({
                             id: index,
                             type: msg.type,
