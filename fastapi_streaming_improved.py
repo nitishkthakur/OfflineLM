@@ -3,7 +3,7 @@
 Improved FastAPI streaming chat with proper Server-Sent Events implementation.
 """
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -223,7 +223,7 @@ async def chat_stream_minimal(chat_message: ChatMessage):
     )
 
 @app.post("/download-chat-pdf")
-async def download_chat_pdf():
+async def download_chat_pdf(background_tasks: BackgroundTasks):
     """Generate and download chat conversation as PDF with markdown formatting."""
     try:
         # Get conversation messages
@@ -300,7 +300,10 @@ async def download_chat_pdf():
             fontSize=10,
             leftIndent=20,
             spaceAfter=8,
-            leading=14
+            spaceBefore=4,
+            leading=14,
+            allowWidows=0,
+            allowOrphans=0
         )
         
         code_style = ParagraphStyle(
@@ -309,7 +312,12 @@ async def download_chat_pdf():
             fontSize=9,
             leftIndent=30,
             spaceAfter=8,
-            backgroundColor='#f5f5f5'
+            spaceBefore=4,
+            backgroundColor='#f5f5f5',
+            fontName='Courier',
+            borderWidth=1,
+            borderColor=darkgray,
+            borderPadding=6
         )
         
         # Build PDF content
@@ -334,83 +342,124 @@ async def download_chat_pdf():
             else:
                 story.append(Paragraph("🤖 <b>Assistant:</b>", assistant_header_style))
             
-            # Process content - preserve markdown formatting
+            # Process content - preserve markdown formatting and order
             content = message['content']
             
-            # Convert markdown to HTML while preserving code blocks
             try:
-                # Handle code blocks specially
+                # Handle content with code blocks while preserving order
                 if '```' in content:
                     parts = content.split('```')
-                    processed_content = ""
                     
                     for j, part in enumerate(parts):
-                        if j % 2 == 0:  # Regular text
+                        if j % 2 == 0:  # Regular text (not code)
                             if part.strip():
-                                # Convert markdown to HTML for regular text
+                                # Process markdown for regular text
                                 html_content = markdown.markdown(part.strip())
                                 # Clean up HTML tags for ReportLab
-                                html_content = html_content.replace('<p>', '').replace('</p>', '<br/>')
+                                html_content = html_content.replace('<p>', '').replace('</p>', '<br/><br/>')
                                 html_content = html_content.replace('<strong>', '<b>').replace('</strong>', '</b>')
                                 html_content = html_content.replace('<em>', '<i>').replace('</em>', '</i>')
-                                processed_content += html_content
+                                html_content = html_content.replace('<code>', '<font name="Courier"><b>').replace('</code>', '</b></font>')
+                                
+                                # Handle headers with proper formatting
+                                html_content = html_content.replace('<h1>', '<b><font size="14">').replace('</h1>', '</font></b><br/><br/>')
+                                html_content = html_content.replace('<h2>', '<b><font size="12">').replace('</h2>', '</font></b><br/><br/>')
+                                html_content = html_content.replace('<h3>', '<b><font size="11">').replace('</h3>', '</font></b><br/>')
+                                html_content = html_content.replace('<h4>', '<b>').replace('</h4>', '</b><br/>')
+                                
+                                # Handle lists with better formatting
+                                html_content = html_content.replace('<ul>', '<br/>').replace('</ul>', '<br/>')
+                                html_content = html_content.replace('<ol>', '<br/>').replace('</ol>', '<br/>')
+                                html_content = html_content.replace('<li>', '  • ').replace('</li>', '<br/>')
+                                
+                                # Handle blockquotes
+                                html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
+                                
+                                # Clean up extra line breaks
+                                html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
+                                
+                                if html_content.strip():
+                                    story.append(Paragraph(html_content, content_style))
                         else:  # Code block
                             if part.strip():
-                                # Add code block
+                                # Extract language and code
                                 lines = part.strip().split('\n')
-                                # Skip language identifier if present
+                                language = ""
+                                code_lines = lines
+                                
+                                # Check if first line is a language identifier
                                 if lines and not any(char.isspace() for char in lines[0]) and len(lines[0]) < 20:
-                                    lines = lines[1:]
-                                code_text = '\n'.join(lines)
-                                story.append(Paragraph("Code:", content_style))
+                                    language = lines[0]
+                                    code_lines = lines[1:]
+                                
+                                code_text = '\n'.join(code_lines)
+                                
+                                # Add code block with language label if present
+                                if language:
+                                    story.append(Paragraph(f"<b>Code ({language}):</b>", content_style))
+                                else:
+                                    story.append(Paragraph("<b>Code:</b>", content_style))
+                                
                                 story.append(Preformatted(code_text, code_style))
-                                continue
-                    
-                    if processed_content.strip():
-                        story.append(Paragraph(processed_content, content_style))
+                                story.append(Spacer(1, 6))  # Small space after code block
                 
                 else:
                     # No code blocks, process as regular markdown
                     html_content = markdown.markdown(content)
-                    # Clean up HTML for ReportLab
-                    html_content = html_content.replace('<p>', '').replace('</p>', '<br/>')
+                    
+                    # Clean up HTML for ReportLab with better formatting
+                    html_content = html_content.replace('<p>', '').replace('</p>', '<br/><br/>')
                     html_content = html_content.replace('<strong>', '<b>').replace('</strong>', '</b>')
                     html_content = html_content.replace('<em>', '<i>').replace('</em>', '</i>')
-                    html_content = html_content.replace('<h1>', '<b>').replace('</h1>', '</b><br/>')
-                    html_content = html_content.replace('<h2>', '<b>').replace('</h2>', '</b><br/>')
-                    html_content = html_content.replace('<h3>', '<b>').replace('</h3>', '</b><br/>')
+                    html_content = html_content.replace('<code>', '<font name="Courier"><b>').replace('</code>', '</b></font>')
                     
-                    # Handle lists
-                    html_content = html_content.replace('<ul>', '').replace('</ul>', '')
-                    html_content = html_content.replace('<ol>', '').replace('</ol>', '')
-                    html_content = html_content.replace('<li>', '• ').replace('</li>', '<br/>')
+                    # Handle headers with proper sizing
+                    html_content = html_content.replace('<h1>', '<b><font size="14">').replace('</h1>', '</font></b><br/><br/>')
+                    html_content = html_content.replace('<h2>', '<b><font size="12">').replace('</h2>', '</font></b><br/><br/>')
+                    html_content = html_content.replace('<h3>', '<b><font size="11">').replace('</h3>', '</font></b><br/>')
+                    html_content = html_content.replace('<h4>', '<b>').replace('</h4>', '</b><br/>')
                     
-                    story.append(Paragraph(html_content, content_style))
+                    # Handle lists with better formatting
+                    html_content = html_content.replace('<ul>', '<br/>').replace('</ul>', '<br/>')
+                    html_content = html_content.replace('<ol>', '<br/>').replace('</ol>', '<br/>')
+                    html_content = html_content.replace('<li>', '  • ').replace('</li>', '<br/>')
+                    
+                    # Handle blockquotes
+                    html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
+                    
+                    # Clean up extra line breaks
+                    html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
+                    
+                    if html_content.strip():
+                        story.append(Paragraph(html_content, content_style))
                     
             except Exception as e:
                 # Fallback to plain text if markdown processing fails
+                print(f"Error processing markdown: {e}")
                 story.append(Paragraph(content.replace('\n', '<br/>'), content_style))
             
             # Add space between messages
             if i < len(messages) - 1:
-                story.append(Spacer(1, 12))
+                story.append(Spacer(1, 15))
         
         # Build PDF
         doc.build(story)
         
-        # Return file for download
+        # Add cleanup task to background tasks
         def cleanup_file():
             try:
                 os.unlink(filepath)
             except:
                 pass
         
+        background_tasks.add_task(cleanup_file)
+        
+        # Return file for download
         return FileResponse(
             filepath,
             media_type='application/pdf',
             filename=filename,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            background=cleanup_file
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
         
     except Exception as e:
