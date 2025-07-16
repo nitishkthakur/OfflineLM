@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Think Tags Test</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body style="background: #2d2d2d; color: #fff; padding: 20px;">
+    <h2>Think Tags Test</h2>
+    
+    <div id="test-output"></div>
+    
+    <script>
+        function processThinkTags(content) {
+            // Check if content starts with <think> and contains </think>
+            const thinkRegex = /^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$/;
+            const match = content.match(thinkRegex);
+            
+            if (match) {
+                const [, openTag, thinkContent, closeTag, remainingContent] = match;
+                
+                // Clean up the think content - remove extra whitespace but preserve structure
+                const cleanThinkContent = thinkContent.trim();
+                
+                // Format the think section with special styling
+                const formattedThinkSection = `<div class="think-section"><em>${openTag}\n${cleanThinkContent}\n${closeTag}</em></div>\n\n`;
+                
+                // Add two newlines after think section and return with remaining content
+                return formattedThinkSection + remainingContent.trim();
+            }
+            
+            // If we're in the middle of streaming and see <think> at the start but no closing tag yet,
+            // we'll format it differently to show it's in progress
+            if (content.startsWith('<think>') && !content.includes('</think>')) {
+                // Format as in-progress think section
+                return `<div class="think-section think-streaming"><em>${content}</em></div>`;
+            }
+            
+            return content;
+        }
+        
+        // Test cases
+        const testCases = [
+            "<think>\nThis is thinking content\n</think>\n\nThis is the main response.",
+            "<think>\nSome reasoning here\n</think>\n\nHere's the actual answer.",
+            "Regular response without think tags",
+            "<think>\nIncomplete thinking...",
+            "<think>\nMulti-line\nthinking\nprocess\n</think>\n\nFinal answer here."
+        ];
+        
+        const output = document.getElementById('test-output');
+        
+        testCases.forEach((test, index) => {
+            const result = processThinkTags(test);
+            output.innerHTML += `
+                <div style="margin: 20px 0; border: 1px solid #666; padding: 10px;">
+                    <h4>Test ${index + 1}:</h4>
+                    <p><strong>Input:</strong> <pre style="background: #1a1a1a; padding: 10px;">${test}</pre></p>
+                    <p><strong>Output:</strong></p>
+                    <div style="border: 1px solid #444; padding: 10px;">${result}</div>
+                </div>
+            `;
+        });
+    </script>
+</body>
+</html>

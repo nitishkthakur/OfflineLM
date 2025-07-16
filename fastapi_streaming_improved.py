@@ -222,6 +222,36 @@ async def chat_stream_minimal(chat_message: ChatMessage):
         }
     )
 
+def process_think_tags_for_pdf(content):
+    """
+    Process think tags for PDF generation by converting them to readable format.
+    Removes HTML formatting and converts to markdown-friendly format.
+    """
+    import re
+    
+    # Check if content starts with <think> and contains </think>
+    think_regex = r'^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$'
+    match = re.match(think_regex, content)
+    
+    if match:
+        open_tag, think_content, close_tag, remaining_content = match.groups()
+        
+        # Format think section for PDF
+        think_section = f"**💭 Reasoning Process:**\n\n_{think_content.strip()}_\n\n---\n\n"
+        
+        # Return formatted content
+        if remaining_content.strip():
+            return think_section + remaining_content.strip()
+        else:
+            return think_section
+    
+    # Remove any HTML div tags that might have been passed from frontend
+    content = re.sub(r'<div[^>]*class="think-section[^"]*"[^>]*>', '**💭 Reasoning Process:**\n\n', content)
+    content = re.sub(r'<em>(.*?)</em>', r'_\1_', content, flags=re.DOTALL)
+    content = re.sub(r'</div>', '\n\n---\n\n', content)
+    
+    return content
+
 @app.post("/download-chat-pdf")
 async def download_chat_pdf(background_tasks: BackgroundTasks):
     """
@@ -361,6 +391,9 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
             content = message['content']
             
             try:
+                # Handle think tags specially for PDF generation
+                content = process_think_tags_for_pdf(content)
+                
                 # Handle content with code blocks while preserving order
                 if '```' in content:
                     parts = content.split('```')

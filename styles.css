@@ -472,3 +472,48 @@ body {
     font-size: 12px;
     margin-top: 5px;
 }
+
+/* Think section styling */
+.think-section {
+    background-color: #1e2a3a !important;
+    border-left: 4px solid #4a90e2 !important;
+    padding: 12px !important;
+    margin: 8px 0 16px 0 !important;
+    border-radius: 6px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.think-section em {
+    color: #b8d4f0 !important;
+    font-style: italic !important;
+    font-size: 0.95em;
+    line-height: 1.4;
+    display: block;
+    white-space: pre-wrap;
+}
+
+.think-section em::before {
+    content: "💭 ";
+    opacity: 0.7;
+}
+
+/* Streaming think section (incomplete) */
+.think-streaming {
+    border-left-color: #ffa500 !important;
+    background-color: #2a251e !important;
+}
+
+.think-streaming em {
+    color: #ffd4a0 !important;
+}
+
+.think-streaming em::before {
+    content: "💭 ";
+    opacity: 0.8;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 0.4; }
+}

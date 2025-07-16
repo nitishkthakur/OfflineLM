@@ -48,7 +48,9 @@ function streamingChatApp() {
         
         formatMessage(content) {
             try {
-                let html = marked.parse(content);
+                // Process think tags first before markdown parsing
+                const processedContent = this.processThinkTags(content);
+                let html = marked.parse(processedContent);
                 setTimeout(() => {
                     document.querySelectorAll('pre code').forEach((block) => {
                         hljs.highlightElement(block);
@@ -57,11 +59,49 @@ function streamingChatApp() {
                 return html;
             } catch (error) {
                 console.error('Error parsing markdown:', error);
-                return content
+                return this.processThinkTags(content)
                     .replace(/\n/g, '<br>')
                     .replace(/  /g, '&nbsp;&nbsp;')
                     .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
             }
+        },
+
+        processThinkTags(content) {
+            // Check if content starts with <think> and contains </think>
+            const thinkRegex = /^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$/;
+            const match = content.match(thinkRegex);
+            
+            if (match) {
+                const [, openTag, thinkContent, closeTag, remainingContent] = match;
+                
+                // Clean up the think content - preserve newlines and structure
+                const cleanThinkContent = thinkContent.trim();
+                
+                // Format the think section with special styling
+                const formattedThinkSection = `<div class="think-section"><em>${openTag}\n${cleanThinkContent}\n${closeTag}</em></div>`;
+                
+                // Add proper spacing after think section
+                if (remainingContent.trim()) {
+                    return formattedThinkSection + '\n\n' + remainingContent.trim();
+                } else {
+                    return formattedThinkSection;
+                }
+            }
+            
+            // If we're in the middle of streaming and see <think> at the start but no closing tag yet,
+            // we'll format it differently to show it's in progress
+            if (content.startsWith('<think>') && !content.includes('</think>')) {
+                // Format as in-progress think section
+                return `<div class="think-section think-streaming"><em>${content}</em></div>`;
+            }
+            
+            return content;
+        },
+
+        cleanContentForBackend(content) {
+            // This function returns clean content suitable for backend processing
+            // It preserves think tags in their original form for proper PDF generation
+            return content; // Raw content is already clean - no HTML processing needed
         },
         
         async sendMessage() {
@@ -322,7 +362,7 @@ function configPanel() {
                 if (chatApp) {
                     const conversationHistory = chatApp.messages.map(msg => ({
                         role: msg.type === 'user' ? 'user' : 'assistant',
-                        content: msg.rawContent || msg.content.replace(/<[^>]*>/g, '') // Strip HTML for raw content
+                        content: msg.rawContent || chatApp.cleanContentForBackend(msg.content.replace(/<[^>]*>/g, ''))
                     }));
                     
                     console.log('Sending model change request with history length:', conversationHistory.length);
