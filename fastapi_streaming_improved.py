@@ -224,6 +224,21 @@ async def chat_stream_minimal(chat_message: ChatMessage):
 
 @app.post("/download-chat-pdf")
 async def download_chat_pdf(background_tasks: BackgroundTasks):
+    """
+    Asynchronously generates a PDF export of the current chat conversation, preserving markdown formatting and code blocks, and returns it as a downloadable file response.
+    Args:
+        background_tasks (BackgroundTasks): FastAPI background tasks manager for scheduling file cleanup after download.
+    Returns:
+        FileResponse: A FastAPI response object for downloading the generated PDF file.
+    Raises:
+        HTTPException: If there are no messages to export or if PDF generation fails.
+    Process Overview:
+        - Retrieves chat history from the chat agent.
+        - Formats messages with markdown and code block support for PDF rendering.
+        - Generates a styled PDF file with metadata and message formatting.
+        - Schedules temporary file cleanup after download.
+        - Returns the PDF as a downloadable file response.
+    """
     """Generate and download chat conversation as PDF with markdown formatting."""
     try:
         # Get conversation messages
