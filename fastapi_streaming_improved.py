@@ -23,18 +23,47 @@ from typing import List, Dict, Optional
 import threading
 import time
 import subprocess
+import re
 
 app = FastAPI(title="Ollama Streaming Chat API - Improved")
 
 # Mount static files (CSS, JS, etc.)
 app.mount("/static", StaticFiles(directory="."), name="static")
 
-# Initialize the chat agent
-chat_agent = OllamaChat(model="qwen3:4b")
+# Global variables for model management
+default_model = None
+chat_agent = None
 
 # Track active streaming sessions
 active_streams = {}
 stream_locks = {}
+
+def get_first_available_model():
+    """Get the first available model from OLLAMA server."""
+    try:
+        import requests
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            models = data.get('models', [])
+            if models:
+                return models[0].get('name', 'qwen2.5:7b')
+    except Exception as e:
+        print(f"Could not fetch models from OLLAMA: {e}")
+    
+    # Fallback to a common model
+    return "qwen2.5:7b"
+
+def initialize_chat_agent():
+    """Initialize the chat agent with the first available model."""
+    global default_model, chat_agent
+    default_model = get_first_available_model()
+    chat_agent = OllamaChat(model=default_model)
+    print(f"Initialized chat agent with model: {default_model}")
+    return default_model
+
+# Initialize the chat agent with the first available model
+default_model = initialize_chat_agent()
 
 class ChatMessage(BaseModel):
     message: str
@@ -65,11 +94,11 @@ async def index():
 
 @app.get("/models")
 async def get_available_models():
-    """Get list of available Ollama models."""
+    """Get list of available Ollama models with consistent default."""
     try:
         # Try to get models from Ollama API
         import requests
-        response = requests.get("http://localhost:11434/api/tags")
+        response = requests.get("http://localhost:11434/api/tags", timeout=10)
         if response.status_code == 200:
             data = response.json()
             models = []
@@ -79,18 +108,30 @@ async def get_available_models():
                     'size': model.get('size', 'Unknown'),
                     'modified_at': model.get('modified_at', 'Unknown')
                 })
-            return {"models": models}
+            
+            # Include the default model info
+            result = {
+                "models": models,
+                "default_model": default_model if models else None,
+                "status": "success"
+            }
+            return result
     except Exception as e:
         print(f"Error fetching models from Ollama: {e}")
     
-    # Fallback to common models if API fails
+    # Fallback to common models if API fails, with consistent default
     fallback_models = [
+        {"name": default_model, "size": "Unknown", "modified_at": "Recently"},
         {"name": "qwen2.5:7b", "size": "4.7GB", "modified_at": "Recently"},
         {"name": "gemma3:4b-it-fp16", "size": "2.4GB", "modified_at": "Recently"},
         {"name": "llama3.2:3b", "size": "2.0GB", "modified_at": "Recently"},
         {"name": "phi3:mini", "size": "2.3GB", "modified_at": "Recently"},
     ]
-    return {"models": fallback_models}
+    return {
+        "models": fallback_models,
+        "default_model": default_model,
+        "status": "fallback"
+    }
 
 async def stop_all_other_models(current_model: str) -> List[str]:
     """Stop all OLLAMA models except the current one."""
@@ -214,7 +255,8 @@ async def get_model_status():
             return {
                 "status": "success",
                 "models": model_status,
-                "current_model": chat_agent.model if chat_agent else None
+                "current_model": chat_agent.model if chat_agent else None,
+                "default_model": default_model
             }
         else:
             return {
@@ -226,8 +268,18 @@ async def get_model_status():
         return {
             "status": "error",
             "message": str(e),
-            "models": []
+            "models": [],
+            "default_model": default_model
         }
+
+@app.get("/default-model")
+async def get_default_model():
+    """Get the current default model."""
+    return {
+        "default_model": default_model,
+        "current_model": chat_agent.model if chat_agent else None,
+        "status": "success"
+    }
 
 @app.get("/chat/stream-sse")
 async def chat_stream_sse(message: str, model: str = None, session: str = None):
@@ -700,11 +752,24 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
                                 # Handle blockquotes
                                 html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
                                 
+                                # Handle image tags - remove them or replace with text since ReportLab can't handle them easily
+                                # Replace img tags with [Image] placeholder or remove them entirely
+                                html_content = re.sub(r'<img[^>]*alt=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image: \1]', html_content)
+                                html_content = re.sub(r'<img[^>]*src=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image]', html_content)
+                                html_content = re.sub(r'<img[^>]*/?>', '[Image]', html_content)
+                                
                                 # Clean up extra line breaks
                                 html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
                                 
                                 if html_content.strip():
-                                    story.append(Paragraph(html_content, content_style))
+                                    try:
+                                        story.append(Paragraph(html_content, content_style))
+                                    except Exception as para_error:
+                                        # If ReportLab's Paragraph fails to parse HTML, fall back to plain text
+                                        print(f"ReportLab Paragraph error: {para_error}")
+                                        # Strip HTML tags and use plain text
+                                        plain_text = re.sub(r'<[^>]+>', '', html_content)
+                                        story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
                         else:  # Code block
                             if part.strip():
                                 # Extract language and code
@@ -752,11 +817,24 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
                     # Handle blockquotes
                     html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
                     
+                    # Handle image tags - remove them or replace with text since ReportLab can't handle them easily
+                    # Replace img tags with [Image] placeholder or remove them entirely
+                    html_content = re.sub(r'<img[^>]*alt=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image: \1]', html_content)
+                    html_content = re.sub(r'<img[^>]*src=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image]', html_content)
+                    html_content = re.sub(r'<img[^>]*/?>', '[Image]', html_content)
+                    
                     # Clean up extra line breaks
                     html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
                     
                     if html_content.strip():
-                        story.append(Paragraph(html_content, content_style))
+                        try:
+                            story.append(Paragraph(html_content, content_style))
+                        except Exception as para_error:
+                            # If ReportLab's Paragraph fails to parse HTML, fall back to plain text
+                            print(f"ReportLab Paragraph error: {para_error}")
+                            # Strip HTML tags and use plain text
+                            plain_text = re.sub(r'<[^>]+>', '', html_content)
+                            story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
                     
             except Exception as e:
                 # Fallback to plain text if markdown processing fails

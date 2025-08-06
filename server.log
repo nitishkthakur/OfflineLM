@@ -1,0 +1,9 @@
+INFO:     Started server process [108050]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8001): address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+Initialized chat agent with model: gpt-oss:20b
+Starting Improved FastAPI streaming chat server...
+Open http://localhost:8001 in your browser

@@ -6,6 +6,9 @@ function streamingChatApp() {
         messageId: 0,
         statusMessage: 'Ready to chat!',
         currentEventSource: null,
+        currentStreamSession: null,
+        retryAttempts: 0,
+        maxRetries: 2,
         
         init() {
             // Configure marked.js with highlight.js
@@ -128,15 +131,35 @@ function streamingChatApp() {
             this.addMessage('assistant', '', true);
             
             try {
+                // Generate unique session ID for this stream
+                const sessionId = 'stream_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                this.currentStreamSession = sessionId;
+                
                 // Create EventSource for streaming
-                const currentModel = Alpine.store('configPanel')?.selectedModel || 
-                                   window.configPanelInstance?.selectedModel || 
-                                   'qwen3:4b';
+                // Get current model with proper fallback chain
+                let currentModel = Alpine.store('configPanel')?.selectedModel || 
+                                   window.configPanelInstance?.selectedModel;
+                
+                // If no model is set, get default from server
+                if (!currentModel) {
+                    try {
+                        const defaultResponse = await fetch('/default-model');
+                        const defaultData = await defaultResponse.json();
+                        currentModel = defaultData.default_model || 'qwen2.5:7b';
+                    } catch (e) {
+                        currentModel = 'qwen2.5:7b'; // Ultimate fallback
+                    }
+                }
                 console.log('Using model for streaming:', currentModel);
-                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}`);
+                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}&session=${sessionId}`);
                 this.currentEventSource = eventSource;
                 
+                // Add connection state tracking
+                let connectionEstablished = false;
+                let hasReceivedData = false;
+                
                 eventSource.onopen = () => {
+                    connectionEstablished = true;
                     this.statusMessage = 'Connected, waiting for response...';
                 };
                 
@@ -145,6 +168,7 @@ function streamingChatApp() {
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'chunk' && data.content) {
+                            hasReceivedData = true;
                             // Find the assistant message and append content
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                             if (assistantMsg) {
@@ -190,7 +214,15 @@ function streamingChatApp() {
                         } else if (data.type === 'error') {
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                             if (assistantMsg) {
-                                assistantMsg.content = '❌ Error: ' + data.message;
+                                // Preserve existing content and append error
+                                const existingContent = assistantMsg.rawContent || assistantMsg.content.replace(/<[^>]*>/g, '');
+                                if (existingContent.trim()) {
+                                    assistantMsg.rawContent = existingContent + '\n\n*[Error: ' + data.message + ']*';
+                                    assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                                } else {
+                                    assistantMsg.content = '❌ Error: ' + data.message;
+                                    assistantMsg.rawContent = '❌ Error: ' + data.message;
+                                }
                                 assistantMsg.streaming = false;
                             }
                             eventSource.close();
@@ -212,10 +244,28 @@ function streamingChatApp() {
                 };
                 
                 eventSource.onerror = (event) => {
-                    console.error('EventSource error:', event);
+                    console.error('EventSource error:', event, 'ReadyState:', eventSource.readyState);
                     const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                     if (assistantMsg) {
-                        assistantMsg.content = '❌ Connection error. Please try again.';
+                        // Preserve existing content and append error with more context
+                        const existingContent = assistantMsg.rawContent || assistantMsg.content.replace(/<[^>]*>/g, '');
+                        let errorMessage = '';
+                        
+                        if (!connectionEstablished) {
+                            errorMessage = '*[Failed to connect to server - please check connection]*';
+                        } else if (!hasReceivedData) {
+                            errorMessage = '*[Connection lost before receiving response - server may be overloaded]*';
+                        } else {
+                            errorMessage = '*[Connection interrupted - partial response received]*';
+                        }
+                        
+                        if (existingContent.trim()) {
+                            assistantMsg.rawContent = existingContent + '\n\n' + errorMessage;
+                            assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                        } else {
+                            assistantMsg.content = '❌ Connection error. Please try again.';
+                            assistantMsg.rawContent = '❌ Connection error. Please try again.';
+                        }
                         assistantMsg.streaming = false;
                     }
                     eventSource.close();
@@ -238,7 +288,15 @@ function streamingChatApp() {
                         eventSource.close();
                         const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                         if (assistantMsg) {
-                            assistantMsg.content = '⏱️ Request timeout. Please try again.';
+                            // Preserve existing content and append timeout error
+                            const existingContent = assistantMsg.rawContent || assistantMsg.content.replace(/<[^>]*>/g, '');
+                            if (existingContent.trim()) {
+                                assistantMsg.rawContent = existingContent + '\n\n*[Request timeout - response incomplete]*';
+                                assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                            } else {
+                                assistantMsg.content = '⏱️ Request timeout. Please try again.';
+                                assistantMsg.rawContent = '⏱️ Request timeout. Please try again.';
+                            }
                             assistantMsg.streaming = false;
                         }
                         this.currentEventSource = null;
@@ -259,7 +317,15 @@ function streamingChatApp() {
                 console.error('Error setting up streaming:', error);
                 const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                 if (assistantMsg) {
-                    assistantMsg.content = '❌ Failed to start streaming. Please try again.';
+                    // For setup errors, there shouldn't be existing content, but check anyway
+                    const existingContent = assistantMsg.rawContent || assistantMsg.content.replace(/<[^>]*>/g, '');
+                    if (existingContent.trim()) {
+                        assistantMsg.rawContent = existingContent + '\n\n*[Streaming setup failed]*';
+                        assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                    } else {
+                        assistantMsg.content = '❌ Failed to start streaming. Please try again.';
+                        assistantMsg.rawContent = '❌ Failed to start streaming. Please try again.';
+                    }
                     assistantMsg.streaming = false;
                 }
                 this.isLoading = false;
@@ -303,7 +369,10 @@ function streamingChatApp() {
                 const streamingMsg = this.messages.find(msg => msg.streaming);
                 if (streamingMsg) {
                     streamingMsg.streaming = false;
-                    streamingMsg.content += '\n\n*[Streaming stopped by user]*';
+                    // Preserve content properly
+                    const existingContent = streamingMsg.rawContent || streamingMsg.content.replace(/<[^>]*>/g, '');
+                    streamingMsg.rawContent = existingContent + '\n\n*[Streaming stopped by user]*';
+                    streamingMsg.content = this.formatMessage(streamingMsg.rawContent);
                 }
                 
                 this.statusMessage = 'Streaming stopped';
@@ -369,12 +438,12 @@ function streamingChatApp() {
 function configPanel() {
     return {
         availableModels: [],
-        selectedModel: 'qwen3:4b', // Default model
+        selectedModel: null, // Will be set dynamically
         selectedModelInfo: null,
         isLoadingModels: false,
         chatStats: {
             messageCount: 0,
-            currentModel: 'qwen3:4b',
+            currentModel: null, // Will be set dynamically
             status: 'Ready'
         },
         modelStatus: [],
@@ -396,18 +465,51 @@ function configPanel() {
                 const data = await response.json();
                 this.availableModels = data.models || [];
                 
+                // Use the server-provided default model or first available model
+                const defaultModel = data.default_model || (this.availableModels.length > 0 ? this.availableModels[0].name : 'qwen2.5:7b');
+                
+                // Set the default model if not already set
+                if (!this.selectedModel) {
+                    this.selectedModel = defaultModel;
+                    this.chatStats.currentModel = defaultModel;
+                }
+                
                 // Set selected model info
                 this.selectedModelInfo = this.availableModels.find(model => model.name === this.selectedModel);
-                this.chatStats.currentModel = this.selectedModel;
+                
+                console.log(`Default model set to: ${this.selectedModel}`);
+                
             } catch (error) {
                 console.error('Error loading models:', error);
-                // Fallback models if API fails
-                this.availableModels = [
-                    { name: 'qwen3:4b', size: '2.6GB', modified_at: 'Recently' },
-                    { name: 'gemma3:4b', size: '3.3GB', modified_at: 'Recently' },
-                    { name: 'llama3.2:1b', size: '1.3GB', modified_at: 'Recently' },
-                    { name: 'deepseek-r1:8b', size: '5.2GB', modified_at: 'Recently' }
-                ];
+                
+                // Fallback: get default from server or use hardcoded fallback
+                try {
+                    const defaultResponse = await fetch('/default-model');
+                    const defaultData = await defaultResponse.json();
+                    const fallbackDefault = defaultData.default_model || 'qwen2.5:7b';
+                    
+                    // Fallback models if API fails
+                    this.availableModels = [
+                        { name: fallbackDefault, size: 'Unknown', modified_at: 'Recently' },
+                        { name: 'qwen2.5:7b', size: '4.7GB', modified_at: 'Recently' },
+                        { name: 'gemma3:4b-it-fp16', size: '2.4GB', modified_at: 'Recently' },
+                        { name: 'llama3.2:3b', size: '2.0GB', modified_at: 'Recently' }
+                    ];
+                    
+                    this.selectedModel = fallbackDefault;
+                    this.chatStats.currentModel = fallbackDefault;
+                    
+                } catch (defaultError) {
+                    console.error('Error getting default model:', defaultError);
+                    // Final fallback
+                    const ultimateFallback = 'qwen2.5:7b';
+                    this.availableModels = [
+                        { name: ultimateFallback, size: 'Unknown', modified_at: 'Recently' }
+                    ];
+                    this.selectedModel = ultimateFallback;
+                    this.chatStats.currentModel = ultimateFallback;
+                }
+                
                 this.selectedModelInfo = this.availableModels[0];
             } finally {
                 this.isLoadingModels = false;
