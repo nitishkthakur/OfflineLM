@@ -19,7 +19,10 @@ from reportlab.lib.units import inch
 from reportlab.lib.colors import black, blue, darkgray
 import markdown
 from basic_ollama_agent_with_post import OllamaChat
-from typing import List, Dict
+from typing import List, Dict, Optional
+import threading
+import time
+import subprocess
 
 app = FastAPI(title="Ollama Streaming Chat API - Improved")
 
@@ -29,12 +32,21 @@ app.mount("/static", StaticFiles(directory="."), name="static")
 # Initialize the chat agent
 chat_agent = OllamaChat(model="qwen3:4b")
 
+# Track active streaming sessions
+active_streams = {}
+stream_locks = {}
+
 class ChatMessage(BaseModel):
     message: str
 
 class ModelChangeRequest(BaseModel):
     model: str
     conversation_history: List[Dict[str, str]] = []
+
+class ModelStatusUpdate(BaseModel):
+    status: str
+    message: str
+    timestamp: str
 
 class ModelInfo(BaseModel):
     name: str
@@ -80,33 +92,153 @@ async def get_available_models():
     ]
     return {"models": fallback_models}
 
+async def stop_all_other_models(current_model: str) -> List[str]:
+    """Stop all OLLAMA models except the current one."""
+    stopped_models = []
+    try:
+        import requests
+        
+        # First, get list of running models
+        ps_response = requests.get("http://localhost:11434/api/ps")
+        if ps_response.status_code == 200:
+            running_models = ps_response.json().get('models', [])
+            
+            for model_info in running_models:
+                model_name = model_info.get('name', '')
+                if model_name and model_name != current_model:
+                    try:
+                        # Stop the model
+                        stop_response = requests.post(
+                            "http://localhost:11434/api/generate",
+                            json={
+                                "model": model_name,
+                                "keep_alive": 0  # This stops the model immediately
+                            }
+                        )
+                        if stop_response.status_code == 200:
+                            stopped_models.append(model_name)
+                            print(f"Successfully stopped model: {model_name}")
+                    except Exception as e:
+                        print(f"Error stopping model {model_name}: {e}")
+        
+    except Exception as e:
+        print(f"Error in stop_all_other_models: {e}")
+    
+    return stopped_models
+
+async def ensure_model_loaded_with_keepalive(model_name: str) -> bool:
+    """Ensure a model is loaded with 30 minute keepalive."""
+    try:
+        import requests
+        
+        # Send a simple generation request with keepalive to ensure model is loaded
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model_name,
+                "prompt": "",  # Empty prompt to just load the model
+                "stream": False,
+                "keep_alive": "30m"  # Set 30 minute keepalive
+            },
+            timeout=60  # Give it time to load if needed
+        )
+        
+        return response.status_code == 200
+        
+    except Exception as e:
+        print(f"Error ensuring model {model_name} is loaded: {e}")
+        return False
+
 @app.post("/change-model")
 async def change_model(request: ModelChangeRequest):
-    """Change the active model and optionally restore conversation history."""
+    """Change the active model, stop others, and set keepalive to 30 minutes."""
     try:
         global chat_agent
         
-        # Create new chat agent with the selected model
+        print(f"\n\n Model Requested: {request.model}")
+        
+        # Step 1: Stop all other models
+        stopped_models = await stop_all_other_models(request.model)
+        
+        # Step 2: Ensure the new model is loaded with keepalive
+        model_loaded = await ensure_model_loaded_with_keepalive(request.model)
+        
+        if not model_loaded:
+            return {
+                "status": "error", 
+                "message": f"Failed to load model {request.model}",
+                "stopped_models": stopped_models
+            }
+        
+        # Step 3: Create new chat agent with the selected model
         chat_agent = OllamaChat(model=request.model)
-        print("\n\n Model Requested: {}".format(request.model))
-        # Restore conversation history if provided
+        
+        # Step 4: Restore conversation history if provided
         if request.conversation_history:
             chat_agent.conversation_history = request.conversation_history
+        
         print(f"Model changed to {chat_agent.model} with history restored: {len(request.conversation_history)} messages")
+        print(f"Stopped models: {stopped_models}")
         
         return {
             "status": "success", 
             "message": f"Model changed to {request.model}",
-            "history_restored": len(request.conversation_history) > 0
+            "history_restored": len(request.conversation_history) > 0,
+            "stopped_models": stopped_models,
+            "keepalive_set": "30m"
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/model-status")
+async def get_model_status():
+    """Get status of currently running OLLAMA models."""
+    try:
+        import requests
+        
+        response = requests.get("http://localhost:11434/api/ps")
+        if response.status_code == 200:
+            data = response.json()
+            running_models = data.get('models', [])
+            
+            model_status = []
+            for model in running_models:
+                model_status.append({
+                    'name': model.get('name', 'Unknown'),
+                    'size': model.get('size', 'Unknown'),
+                    'size_vram': model.get('size_vram', 'Unknown'),
+                    'until': model.get('until', 'Unknown'),
+                    'status': 'running'
+                })
+            
+            return {
+                "status": "success",
+                "models": model_status,
+                "current_model": chat_agent.model if chat_agent else None
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to get model status from OLLAMA",
+                "models": []
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "models": []
+        }
+
 @app.get("/chat/stream-sse")
-async def chat_stream_sse(message: str, model: str = None):
+async def chat_stream_sse(message: str, model: str = None, session: str = None):
     """Stream chat responses using Server-Sent Events with EventSource."""
     def generate():
         try:
+            # Register this streaming session
+            if session:
+                active_streams[session] = True
+                stream_locks[session] = threading.Lock()
+            
             # Use specified model if provided
             current_agent = chat_agent
             if model and model != chat_agent.model:
@@ -117,16 +249,66 @@ async def chat_stream_sse(message: str, model: str = None):
             
             yield f"data: {json.dumps({'type': 'start', 'message': 'Starting response...'})}\n\n"
             
-            for chunk in current_agent.chat_stream(message):
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            # Stream with interruption checking
+            full_response = ""
+            try:
+                for chunk in current_agent.chat_stream(message):
+                    # Check if stream should be stopped
+                    if session and not active_streams.get(session, False):
+                        print(f"Stream {session} was stopped by user")
+                        # Send stop signal to OLLAMA (sync version inside generator)
+                        import asyncio
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # Schedule the stop function to run
+                                loop.create_task(force_stop_ollama_generation(current_agent.model))
+                            else:
+                                asyncio.run(force_stop_ollama_generation(current_agent.model))
+                        except Exception as e:
+                            print(f"Error scheduling stop: {e}")
+                        yield f"data: {json.dumps({'type': 'stopped', 'message': 'Stream stopped by user'})}\n\n"
+                        break
+                    
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                    
+                    # Small delay to allow interruption checking
+                    time.sleep(0.01)
+                else:
+                    # Stream completed normally
+                    if session and active_streams.get(session, False):
+                        yield f"data: {json.dumps({'type': 'done', 'message': 'Response complete'})}\n\n"
+            except Exception as stream_error:
+                print(f"Error in streaming: {stream_error}")
+                if session:
+                    try:
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(force_stop_ollama_generation(current_agent.model))
+                    except Exception as e:
+                        print(f"Error scheduling stop: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(stream_error)})}\n\n"
             
-            # Update global agent's history if we used a different model
-            if model and model != chat_agent.model:
+            # Update global agent's history if we used a different model and stream wasn't stopped
+            if model and model != chat_agent.model and full_response:
                 chat_agent.conversation_history = current_agent.conversation_history.copy()
             
-            yield f"data: {json.dumps({'type': 'done', 'message': 'Response complete'})}\n\n"
         except Exception as e:
+            print(f"Error in chat_stream_sse: {e}")
+            if session:
+                try:
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(force_stop_ollama_generation(model or chat_agent.model))
+                except Exception as stop_e:
+                    print(f"Error scheduling stop: {stop_e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Clean up session
+            if session:
+                active_streams.pop(session, None)
+                stream_locks.pop(session, None)
     
     return StreamingResponse(
         generate(),
@@ -138,6 +320,101 @@ async def chat_stream_sse(message: str, model: str = None):
             "Access-Control-Allow-Headers": "Content-Type",
         }
     )
+
+async def force_stop_ollama_generation(model_name: str):
+    """Force stop OLLAMA model generation to reduce CPU usage to zero."""
+    try:
+        import requests
+        
+        print(f"Force stopping OLLAMA generation for model: {model_name}")
+        
+        # Method 1: Send empty generation request with immediate stop
+        try:
+            stop_response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": model_name,
+                    "prompt": "",
+                    "stream": False,
+                    "keep_alive": 0  # Stop immediately
+                },
+                timeout=2
+            )
+            print(f"Stop request sent: {stop_response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Stop request failed: {e}")
+        
+        # Method 2: Try to interrupt any running OLLAMA processes
+        try:
+            # Send SIGTERM to OLLAMA processes (graceful stop)
+            result = subprocess.run(
+                ["pkill", "-TERM", "-f", "ollama"],
+                capture_output=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                print("Sent SIGTERM to OLLAMA processes")
+                time.sleep(0.5)  # Give time for graceful shutdown
+            
+            # If still running, send SIGKILL (force stop)
+            result2 = subprocess.run(
+                ["pgrep", "-f", "ollama"],
+                capture_output=True,
+                timeout=1
+            )
+            if result2.returncode == 0 and result2.stdout.strip():
+                print("OLLAMA processes still running, sending SIGKILL")
+                subprocess.run(
+                    ["pkill", "-KILL", "-f", "ollama"],
+                    capture_output=True,
+                    timeout=2
+                )
+                time.sleep(0.2)
+                
+                # Restart OLLAMA service
+                print("Restarting OLLAMA service...")
+                subprocess.Popen(
+                    ["nohup", "ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                
+        except Exception as proc_error:
+            print(f"Error with process management: {proc_error}")
+        
+    except Exception as e:
+        print(f"Error in force_stop_ollama_generation: {e}")
+
+@app.post("/stop-stream/{session_id}")
+async def stop_stream(session_id: str):
+    """Stop an active streaming session."""
+    try:
+        if session_id in active_streams:
+            print(f"Stopping stream session: {session_id}")
+            active_streams[session_id] = False
+            
+            # Force stop OLLAMA generation
+            await force_stop_ollama_generation(chat_agent.model)
+            
+            return {
+                "status": "success",
+                "message": f"Stream {session_id} stopped",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Stream session {session_id} not found",
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        print(f"Error stopping stream {session_id}: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.post("/chat/stream")
 async def chat_stream_post(chat_message: ChatMessage):

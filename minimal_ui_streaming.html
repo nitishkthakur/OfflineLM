@@ -11,7 +11,7 @@
     <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/github-dark.min.css">
     <!-- External CSS -->
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=fluent2">
 </head>
 <body>
     <button class="config-toggle" onclick="toggleConfig()">⚙️</button>
@@ -50,6 +50,10 @@
                     <button type="submit" class="send-button" :disabled="isLoading || !currentMessage.trim()">
                         <span x-show="!isLoading">➤</span>
                         <span x-show="isLoading" class="loading-dots"></span>
+                    </button>
+                    
+                    <button type="button" class="stop-button" @click="stopStreaming" x-show="isLoading" title="Stop streaming">
+                        ⏹️
                     </button>
                     
                     <button type="button" class="clear-button" @click="clearChat" :disabled="isLoading">
@@ -104,6 +108,39 @@
                     </div>
                 </div>
                 
+                <div class="config-section">
+                    <h3>Running Models</h3>
+                    <div class="model-status-list">
+                        <template x-for="model in modelStatus" :key="model.name">
+                            <div class="model-status-item">
+                                <div class="model-name" x-text="model.name"></div>
+                                <div class="model-info-small">
+                                    <span x-text="model.size_vram || model.size"></span> |
+                                    <span x-text="model.status"></span>
+                                </div>
+                            </div>
+                        </template>
+                        <div x-show="modelStatus.length === 0" class="no-models">
+                            No models currently running
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <h3>Model Status Log</h3>
+                    <div class="model-status-log">
+                        <template x-for="statusMsg in modelStatusMessages" :key="statusMsg.id">
+                            <div class="status-message">
+                                <div class="status-text" x-text="statusMsg.message"></div>
+                                <div class="status-time" x-text="statusMsg.timestamp"></div>
+                            </div>
+                        </template>
+                        <div x-show="modelStatusMessages.length === 0" class="no-status">
+                            No recent model activity
+                        </div>
+                    </div>
+                </div>
+
                 <div class="config-section">
                     <button 
                         class="download-chat-btn" 

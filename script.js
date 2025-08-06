@@ -167,6 +167,18 @@ function streamingChatApp() {
                             this.statusMessage = 'Response complete';
                             setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
                             
+                        } else if (data.type === 'stopped') {
+                            const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
+                            if (assistantMsg) {
+                                assistantMsg.streaming = false;
+                                assistantMsg.content += '\n\n*[Stream stopped]*';
+                            }
+                            eventSource.close();
+                            this.currentEventSource = null;
+                            this.isLoading = false;
+                            this.statusMessage = 'Stream stopped';
+                            setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                            
                             // Return focus to the input box after streaming is complete
                             this.$nextTick(() => {
                                 const inputElement = document.querySelector('.chat-input');
@@ -263,6 +275,59 @@ function streamingChatApp() {
             }
         },
         
+        stopStreaming() {
+            if (this.currentEventSource) {
+                console.log('Stopping stream...');
+                
+                // Send stop request to backend if we have a session
+                if (this.currentStreamSession) {
+                    fetch(`/stop-stream/${this.currentStreamSession}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    }).then(response => {
+                        console.log('Stop request sent:', response.status);
+                    }).catch(error => {
+                        console.error('Error sending stop request:', error);
+                    });
+                }
+                
+                // Close EventSource connection
+                this.currentEventSource.close();
+                
+                // Clean up state
+                this.cleanupStream();
+                
+                // Update any streaming message
+                const streamingMsg = this.messages.find(msg => msg.streaming);
+                if (streamingMsg) {
+                    streamingMsg.streaming = false;
+                    streamingMsg.content += '\n\n*[Streaming stopped by user]*';
+                }
+                
+                this.statusMessage = 'Streaming stopped';
+                setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                
+                // Return focus to input
+                this.$nextTick(() => {
+                    const inputElement = document.querySelector('.chat-input');
+                    if (inputElement) {
+                        inputElement.focus();
+                    }
+                });
+            }
+        },
+        
+        cleanupStream() {
+            if (this.currentEventSource) {
+                this.currentEventSource.close();
+                this.currentEventSource = null;
+            }
+            this.currentStreamSession = null;
+            this.isLoading = false;
+        },
+        
         addMessage(type, content, streaming = false) {
             this.messages.push({
                 id: this.messageId++,
@@ -312,6 +377,8 @@ function configPanel() {
             currentModel: 'qwen3:4b',
             status: 'Ready'
         },
+        modelStatus: [],
+        modelStatusMessages: [],
         
         init() {
             // Store this instance globally for access from chat app
@@ -353,7 +420,10 @@ function configPanel() {
                 // Update selected model info
                 this.selectedModelInfo = this.availableModels.find(model => model.name === this.selectedModel);
                 this.chatStats.currentModel = this.selectedModel;
-                this.chatStats.status = 'Model Changing...';
+                this.chatStats.status = 'Switching Model...';
+                
+                // Add status message about model switching
+                this.addModelStatusMessage(`🔄 Switching to ${this.selectedModel}...`);
                 
                 console.log('Attempting to change model to:', this.selectedModel);
                 
@@ -381,19 +451,65 @@ function configPanel() {
                     const result = await response.json();
                     console.log('Model change response:', result);
                     
+                    // Handle stopped models
+                    if (result.stopped_models && result.stopped_models.length > 0) {
+                        result.stopped_models.forEach(modelName => {
+                            this.addModelStatusMessage(`⏹️ Stopped model: ${modelName}`);
+                        });
+                    }
+                    
+                    if (result.status === 'success') {
+                        this.addModelStatusMessage(`✅ ${this.selectedModel} loaded with 30min keepalive`);
+                        this.chatStats.status = 'Model Changed';
+                    } else {
+                        this.addModelStatusMessage(`❌ Failed to switch: ${result.message}`);
+                        this.chatStats.status = 'Error';
+                    }
+                    
                     // Notify chat app about model change
                     if (chatApp.changeModel) {
                         chatApp.changeModel(this.selectedModel);
                     }
                 } else {
                     console.error('Chat app not found');
+                    this.addModelStatusMessage('❌ Chat app not found');
                 }
                 
-                this.chatStats.status = 'Model Changed';
-                setTimeout(() => this.chatStats.status = 'Ready', 2000);
+                // Update model status
+                await this.updateModelStatus();
+                
+                setTimeout(() => this.chatStats.status = 'Ready', 3000);
             } catch (error) {
                 console.error('Error changing model:', error);
                 this.chatStats.status = 'Error';
+                this.addModelStatusMessage(`❌ Error: ${error.message}`);
+            }
+        },
+        
+        addModelStatusMessage(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            this.modelStatusMessages.unshift({
+                message: message,
+                timestamp: timestamp,
+                id: Date.now()
+            });
+            
+            // Keep only the last 10 messages
+            if (this.modelStatusMessages.length > 10) {
+                this.modelStatusMessages = this.modelStatusMessages.slice(0, 10);
+            }
+        },
+        
+        async updateModelStatus() {
+            try {
+                const response = await fetch('/model-status');
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    this.modelStatus = result.models;
+                }
+            } catch (error) {
+                console.error('Error updating model status:', error);
             }
         },
         
@@ -457,7 +573,7 @@ function configPanel() {
         },
         
         updateStats() {
-            // Update stats periodically
+            // Update stats and model status periodically
             setInterval(() => {
                 const chatApp = Alpine.store('chatApp') || window.chatAppInstance;
                 if (chatApp) {
@@ -469,6 +585,14 @@ function configPanel() {
                     }
                 }
             }, 1000);
+            
+            // Update model status every 30 seconds
+            setInterval(() => {
+                this.updateModelStatus();
+            }, 30000);
+            
+            // Initial model status update
+            this.updateModelStatus();
         }
     }
 }
