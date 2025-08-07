@@ -103,8 +103,6 @@ body {
 .main-container {
     display: flex;
     height: 100vh;
-    max-width: 1610px;
-    margin: 0 auto;
     width: 100%;
     /* Fluent 2 distinctive styling */
     border: 2px solid var(--colorBrandBackground);
@@ -118,6 +116,42 @@ body {
     height: 100vh;
     flex: 1;
     min-width: 0; /* Allows flex item to shrink */
+}
+
+.history-sidebar {
+    width: 300px;
+    background-color: var(--colorNeutralBackground2);
+    border-right: 1px solid var(--colorNeutralStroke2);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    box-shadow: var(--shadow8);
+}
+
+.history-upper {
+    flex: 1;
+    /* Empty upper half */
+}
+
+.history-lower {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.history-header {
+    padding: var(--spacingVerticalXXL) var(--spacingHorizontalXXL);
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    text-align: center;
+    background-color: var(--colorNeutralBackground1);
+}
+
+.history-header h2 {
+    font-size: var(--fontSizeBase400);
+    font-weight: var(--fontWeightMedium);
+    margin: 0;
+    color: var(--colorNeutralForeground1);
+    line-height: var(--lineHeightBase400);
 }
 
 .config-sidebar {

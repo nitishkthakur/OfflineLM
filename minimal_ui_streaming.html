@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minimal Chat Interface - Streaming</title>
+    <title>Jarvis-Offline</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
     <!-- Markdown rendering with syntax highlighting -->
@@ -17,9 +17,20 @@
     <button class="config-toggle" onclick="toggleConfig()">⚙️</button>
     
     <div class="main-container">
+        <div class="history-sidebar">
+            <div class="history-upper">
+                <!-- Empty upper half -->
+            </div>
+            <div class="history-lower">
+                <div class="history-header">
+                    <h2>History</h2>
+                </div>
+            </div>
+        </div>
+        
         <div class="chat-container" x-data="streamingChatApp()">
             <div class="chat-header">
-                <h1>Streaming Chat Interface</h1>
+                <h1>Jarvis-Offline</h1>
             </div>
             
             <div class="chat-messages" id="chat-messages" x-ref="chatMessages">
