@@ -25,6 +25,16 @@ import time
 import subprocess
 import re
 
+# Try to import pygments for syntax highlighting, fall back gracefully
+try:
+    from pygments import highlight
+    from pygments.lexers import get_lexer_by_name, TextLexer
+    from pygments.formatters import HtmlFormatter
+    PYGMENTS_AVAILABLE = True
+except ImportError:
+    PYGMENTS_AVAILABLE = False
+    print("Warning: Pygments not available, syntax highlighting disabled")
+
 app = FastAPI(title="Ollama Streaming Chat API - Improved")
 
 # Mount static files (CSS, JS, etc.)
@@ -37,6 +47,134 @@ chat_agent = None
 # Track active streaming sessions
 active_streams = {}
 stream_locks = {}
+
+# Message formatting functions (migrated from frontend)
+def process_think_tags(content: str) -> str:
+    """
+    Process think tags by converting them to styled HTML format.
+    Migrated from frontend JavaScript to backend Python.
+    """
+    # Check if content starts with <think> and contains </think>
+    think_regex = r'^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$'
+    match = re.match(think_regex, content)
+    
+    if match:
+        open_tag, think_content, close_tag, remaining_content = match.groups()
+        
+        # Clean up the think content - preserve newlines and structure
+        clean_think_content = think_content.strip()
+        
+        # Format the think section with special styling
+        formatted_think_section = f'<div class="think-section"><em>{open_tag}\n{clean_think_content}\n{close_tag}</em></div>'
+        
+        # Add proper spacing after think section
+        if remaining_content.strip():
+            return formatted_think_section + '\n\n' + remaining_content.strip()
+        else:
+            return formatted_think_section
+    
+    # If we're in the middle of streaming and see <think> at the start but no closing tag yet,
+    # we'll format it differently to show it's in progress
+    if content.startswith('<think>') and '</think>' not in content:
+        # Format as in-progress think section
+        return f'<div class="think-section think-streaming"><em>{content}</em></div>'
+    
+    return content
+
+def highlight_code_block(code: str, language: str = '') -> str:
+    """
+    Highlight code block using Pygments if available, otherwise return plain HTML.
+    """
+    if not PYGMENTS_AVAILABLE:
+        return f'<pre><code class="language-{language}">{code}</code></pre>'
+    
+    try:
+        if language:
+            lexer = get_lexer_by_name(language, stripall=True)
+        else:
+            lexer = TextLexer()
+        
+        formatter = HtmlFormatter(
+            style='github-dark',
+            noclasses=False,
+            cssclass='highlight'
+        )
+        
+        highlighted = highlight(code, lexer, formatter)
+        return highlighted
+        
+    except Exception as e:
+        # Fallback to plain code block if highlighting fails
+        print(f"Code highlighting error: {e}")
+        return f'<pre><code class="language-{language}">{code}</code></pre>'
+
+def format_message(content: str) -> str:
+    """
+    Format message content with markdown processing and syntax highlighting.
+    Migrated from frontend JavaScript to backend Python.
+    """
+    try:
+        # Process think tags first before markdown parsing
+        processed_content = process_think_tags(content)
+        
+        # Configure markdown with extensions
+        md = markdown.Markdown(
+            extensions=[
+                'codehilite',
+                'fenced_code', 
+                'tables',
+                'toc',
+                'nl2br'
+            ],
+            extension_configs={
+                'codehilite': {
+                    'css_class': 'highlight',
+                    'use_pygments': PYGMENTS_AVAILABLE
+                }
+            }
+        )
+        
+        # Parse markdown
+        html = md.convert(processed_content)
+        
+        return html
+        
+    except Exception as error:
+        print(f"Error parsing markdown: {error}")
+        # Fallback to simple HTML conversion
+        return process_think_tags(content).replace('\n', '<br>').replace('  ', '&nbsp;&nbsp;').replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
+
+def clean_content_for_backend(content: str) -> str:
+    """
+    Clean and sanitize content for backend processing.
+    Migrated from frontend JavaScript to backend Python.
+    """
+    # For now, return content as-is but this could include:
+    # - HTML sanitization
+    # - Content validation  
+    # - Security checks
+    return content
+
+def calculate_chat_stats() -> Dict:
+    """
+    Calculate chat statistics on the backend.
+    """
+    try:
+        message_count = len(chat_agent.get_history()) if chat_agent else 0
+        current_model = chat_agent.model if chat_agent else default_model
+        
+        return {
+            'messageCount': message_count,
+            'currentModel': current_model,
+            'status': 'Ready'
+        }
+    except Exception as e:
+        print(f"Error calculating stats: {e}")
+        return {
+            'messageCount': 0,
+            'currentModel': default_model or 'Unknown',
+            'status': 'Error'
+        }
 
 def get_first_available_model():
     """Get the first available model from OLLAMA server."""
@@ -301,7 +439,7 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None):
             
             yield f"data: {json.dumps({'type': 'start', 'message': 'Starting response...'})}\n\n"
             
-            # Stream with interruption checking
+            # Stream with interruption checking and backend formatting
             full_response = ""
             try:
                 for chunk in current_agent.chat_stream(message):
@@ -323,14 +461,28 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None):
                         break
                     
                     full_response += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                    
+                    # Format the accumulated response using backend formatting
+                    try:
+                        formatted_content = format_message(full_response)
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'formatted_content': formatted_content, 'raw_content': full_response})}\n\n"
+                    except Exception as format_error:
+                        print(f"Formatting error: {format_error}")
+                        # Fallback to sending raw chunk
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk, 'raw_content': full_response})}\n\n"
                     
                     # Small delay to allow interruption checking
                     time.sleep(0.01)
                 else:
-                    # Stream completed normally
+                    # Stream completed normally - send final formatted content
                     if session and active_streams.get(session, False):
-                        yield f"data: {json.dumps({'type': 'done', 'message': 'Response complete'})}\n\n"
+                        try:
+                            final_formatted = format_message(full_response)
+                            stats = calculate_chat_stats()
+                            yield f"data: {json.dumps({'type': 'done', 'message': 'Response complete', 'final_formatted': final_formatted, 'stats': stats})}\n\n"
+                        except Exception as final_format_error:
+                            print(f"Final formatting error: {final_format_error}")
+                            yield f"data: {json.dumps({'type': 'done', 'message': 'Response complete'})}\n\n"
             except Exception as stream_error:
                 print(f"Error in streaming: {stream_error}")
                 if session:
@@ -516,13 +668,19 @@ async def get_messages():
     try:
         messages = []
         for msg in chat_agent.get_history():
+            raw_content = msg['content']
+            formatted_content = format_message(raw_content)
+            
             messages.append({
                 'type': msg['role'],
-                'content': msg['content']
+                'content': formatted_content,
+                'raw_content': raw_content
             })
-        return {"messages": messages}
+        
+        stats = calculate_chat_stats()
+        return {"messages": messages, "stats": stats}
     except Exception as e:
-        return {"messages": [], "error": str(e)}
+        return {"messages": [], "error": str(e), "stats": calculate_chat_stats()}
 
 @app.post("/chat/stream-minimal")
 async def chat_stream_minimal(chat_message: ChatMessage):

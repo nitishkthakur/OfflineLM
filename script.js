@@ -9,19 +9,26 @@ function streamingChatApp() {
         currentStreamSession: null,
         retryAttempts: 0,
         maxRetries: 2,
+        autoScrollEnabled: true,  // Track if auto-scroll is enabled
+        scrollThreshold: 50,      // Pixels from bottom to consider "at bottom"
         
         init() {
-            // Configure marked.js with highlight.js
-            marked.setOptions({
-                highlight: function(code, lang) {
-                    const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-                    return hljs.highlight(code, { language }).value;
-                },
-                breaks: true,
-                gfm: true,
-                tables: true,
-                sanitize: false
-            });
+            // Note: Markdown processing now happens on the backend
+            // Keeping marked.js configuration for backward compatibility but no longer used for new messages
+            if (typeof marked !== 'undefined') {
+                marked.setOptions({
+                    highlight: function(code, lang) {
+                        if (typeof hljs !== 'undefined' && hljs.getLanguage && hljs.getLanguage(lang)) {
+                            return hljs.highlight(code, { language: lang }).value;
+                        }
+                        return code;
+                    },
+                    breaks: true,
+                    gfm: true,
+                    tables: true,
+                    sanitize: false
+                });
+            }
             
             // Make this instance globally accessible
             Alpine.store('chatApp', this);
@@ -29,6 +36,11 @@ function streamingChatApp() {
             
             // Load existing messages on page load
             this.loadMessages();
+            
+            // Set up scroll event listener to track user scrolling
+            this.$nextTick(() => {
+                this.setupScrollListener();
+            });
         },
         
         async loadMessages() {
@@ -38,11 +50,18 @@ function streamingChatApp() {
                 this.messages = data.messages.map((msg, index) => ({
                     id: index,
                     type: msg.type,
-                    content: this.formatMessage(msg.content),
+                    content: msg.content, // Already formatted by backend
+                    rawContent: msg.raw_content || msg.content,
                     streaming: false
                 }));
                 this.messageId = this.messages.length;
-                this.$nextTick(() => this.scrollToBottom());
+                
+                // Update stats from backend if provided
+                if (data.stats) {
+                    this.updateStatsFromBackend(data.stats);
+                }
+                
+                this.$nextTick(() => this.forceScrollToBottom());
             } catch (error) {
                 console.error('Error loading messages:', error);
                 this.statusMessage = 'Error loading messages';
@@ -50,16 +69,28 @@ function streamingChatApp() {
         },
         
         formatMessage(content) {
+            // Formatting now happens on the backend
+            // This function is kept for backward compatibility with old messages
+            // but new messages should already be formatted by the server
             try {
-                // Process think tags first before markdown parsing
-                const processedContent = this.processThinkTags(content);
-                let html = marked.parse(processedContent);
-                setTimeout(() => {
-                    document.querySelectorAll('pre code').forEach((block) => {
-                        hljs.highlightElement(block);
-                    });
-                }, 0);
-                return html;
+                if (typeof marked !== 'undefined') {
+                    const processedContent = this.processThinkTags(content);
+                    let html = marked.parse(processedContent);
+                    setTimeout(() => {
+                        if (typeof hljs !== 'undefined') {
+                            document.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        }
+                    }, 0);
+                    return html;
+                } else {
+                    // Fallback when marked.js is not available
+                    return this.processThinkTags(content)
+                        .replace(/\n/g, '<br>')
+                        .replace(/  /g, '&nbsp;&nbsp;')
+                        .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+                }
             } catch (error) {
                 console.error('Error parsing markdown:', error);
                 return this.processThinkTags(content)
@@ -70,6 +101,8 @@ function streamingChatApp() {
         },
 
         processThinkTags(content) {
+            // Think tag processing now happens on the backend
+            // This function is kept for backward compatibility with old messages
             // Check if content starts with <think> and contains </think>
             const thinkRegex = /^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$/;
             const match = content.match(thinkRegex);
@@ -122,6 +155,9 @@ function streamingChatApp() {
             // Add user message
             this.addMessage('user', userMessage, false);
             
+            // Force scroll to bottom when starting new conversation
+            this.forceScrollToBottom();
+            
             // Start streaming response
             this.isLoading = true;
             this.statusMessage = 'Sending message...';
@@ -169,13 +205,19 @@ function streamingChatApp() {
                         
                         if (data.type === 'chunk' && data.content) {
                             hasReceivedData = true;
-                            // Find the assistant message and append content
+                            // Find the assistant message and update content
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                             if (assistantMsg) {
-                                // Append raw content first, then format
-                                const currentRawContent = assistantMsg.rawContent || '';
-                                assistantMsg.rawContent = currentRawContent + data.content;
-                                assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                                // Use backend-formatted content if available, otherwise format locally
+                                if (data.formatted_content) {
+                                    assistantMsg.content = data.formatted_content;
+                                    assistantMsg.rawContent = data.raw_content || assistantMsg.rawContent;
+                                } else {
+                                    // Fallback to client-side formatting
+                                    const currentRawContent = assistantMsg.rawContent || '';
+                                    assistantMsg.rawContent = currentRawContent + data.content;
+                                    assistantMsg.content = this.formatMessage(assistantMsg.rawContent);
+                                }
                             }
                             this.statusMessage = 'Streaming response...';
                             this.$nextTick(() => this.scrollToBottom());
@@ -184,12 +226,30 @@ function streamingChatApp() {
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
                             if (assistantMsg) {
                                 assistantMsg.streaming = false;
+                                // Use final formatted content from backend if available
+                                if (data.final_formatted) {
+                                    assistantMsg.content = data.final_formatted;
+                                }
                             }
+                            
+                            // Update stats from backend if provided
+                            if (data.stats) {
+                                this.updateStatsFromBackend(data.stats);
+                            }
+                            
                             eventSource.close();
                             this.currentEventSource = null;
                             this.isLoading = false;
                             this.statusMessage = 'Response complete';
                             setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                            
+                            // Return focus to input box after response is complete
+                            this.$nextTick(() => {
+                                const inputElement = document.querySelector('.chat-input');
+                                if (inputElement) {
+                                    inputElement.focus();
+                                }
+                            });
                             
                         } else if (data.type === 'stopped') {
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
@@ -397,11 +457,11 @@ function streamingChatApp() {
             this.isLoading = false;
         },
         
-        addMessage(type, content, streaming = false) {
+        addMessage(type, content, streaming = false, preFormatted = false) {
             this.messages.push({
                 id: this.messageId++,
                 type: type,
-                content: this.formatMessage(content),
+                content: preFormatted ? content : this.formatMessage(content),
                 rawContent: content,
                 streaming: streaming
             });
@@ -413,6 +473,8 @@ function streamingChatApp() {
                 await fetch('/clear', { method: 'POST' });
                 this.messages = [];
                 this.messageId = 0;
+                // Reset auto-scroll for new conversation
+                this.autoScrollEnabled = true;
                 this.statusMessage = 'Chat cleared';
                 setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
             } catch (error) {
@@ -421,9 +483,42 @@ function streamingChatApp() {
             }
         },
         
-        scrollToBottom() {
+        setupScrollListener() {
             const chatMessages = this.$refs.chatMessages;
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (!chatMessages) return;
+            
+            // Add scroll event listener to track user scrolling behavior
+            chatMessages.addEventListener('scroll', () => {
+                const scrollTop = chatMessages.scrollTop;
+                const scrollHeight = chatMessages.scrollHeight;
+                const clientHeight = chatMessages.clientHeight;
+                
+                // Check if user is near the bottom (within threshold)
+                const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+                const isAtBottom = distanceFromBottom <= this.scrollThreshold;
+                
+                // Update auto-scroll state based on user position
+                this.autoScrollEnabled = isAtBottom;
+            });
+        },
+        
+        scrollToBottom() {
+            // Only auto-scroll if enabled (user is at/near bottom or hasn't scrolled up)
+            if (!this.autoScrollEnabled) return;
+            
+            const chatMessages = this.$refs.chatMessages;
+            if (chatMessages) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        },
+        
+        forceScrollToBottom() {
+            // Force scroll to bottom regardless of auto-scroll state (for new conversations)
+            this.autoScrollEnabled = true;
+            const chatMessages = this.$refs.chatMessages;
+            if (chatMessages) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         },
         
         // Expose method to change model from config panel
@@ -431,6 +526,21 @@ function streamingChatApp() {
             this.statusMessage = `Switching to ${newModel}...`;
             // Model change is handled by the config panel
             setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+        },
+        
+        // Update stats from backend data
+        updateStatsFromBackend(stats) {
+            // This would typically update a config panel's stats
+            // For now, we can store the stats for later use
+            this.backendStats = stats;
+            
+            // Notify config panel if available
+            const configPanel = Alpine.store('configPanel') || window.configPanelInstance;
+            if (configPanel && configPanel.chatStats) {
+                configPanel.chatStats.messageCount = stats.messageCount || 0;
+                configPanel.chatStats.currentModel = stats.currentModel || 'Unknown';
+                configPanel.chatStats.status = stats.status || 'Ready';
+            }
         }
     }
 }
