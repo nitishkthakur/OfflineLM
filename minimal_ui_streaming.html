@@ -23,7 +23,34 @@
     <div class="main-container">
         <div class="history-sidebar">
             <div class="history-upper">
-                <!-- Empty upper half -->
+                <div class="tools-section">
+                    <div class="tools-header">
+                        <h3>Tools</h3>
+                    </div>
+                    
+                    <button class="upload-pdf-btn">
+                        Upload PDF
+                    </button>
+                    
+                    <div class="search-card">
+                        <div class="search-header">
+                            <h4>Search</h4>
+                        </div>
+                        <div class="search-content">
+                            <div class="search-toggle-container">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="search-toggle">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Enable Search</span>
+                            </div>
+                            <div class="search-options-container">
+                                <label for="search-count">Search Results:</label>
+                                <input type="number" id="search-count" class="search-count-input" value="5" min="1" max="20">
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="history-lower">
                 <div class="history-header">

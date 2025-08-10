@@ -889,3 +889,167 @@ body {
         font-size: 0.9em;
     }
 }
+
+/* Tools Section Styling */
+.tools-section {
+    padding: var(--spacingVerticalXXL) var(--spacingHorizontalXXL);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalL);
+}
+
+.tools-header {
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+    padding-bottom: var(--spacingVerticalS);
+}
+
+.tools-header h3 {
+    font-size: var(--fontSizeBase300);
+    font-weight: var(--fontWeightMedium);
+    color: var(--colorNeutralForeground1);
+    margin: 0;
+    text-align: center;
+    line-height: var(--lineHeightBase300);
+}
+
+.upload-pdf-btn {
+    width: 100%;
+    background-color: var(--colorBrandBackground);
+    border: none;
+    border-radius: var(--borderRadiusMedium);
+    padding: var(--spacingVerticalM) var(--spacingHorizontalL);
+    color: var(--colorBrandForeground1);
+    cursor: pointer;
+    font-family: var(--fontFamilyBase);
+    font-size: var(--fontSizeBase300);
+    font-weight: var(--fontWeightMedium);
+    transition: background-color 0.2s, box-shadow 0.2s;
+    line-height: var(--lineHeightBase300);
+    box-shadow: var(--shadow2);
+}
+
+.upload-pdf-btn:hover {
+    background-color: var(--colorBrandBackgroundHover);
+    box-shadow: var(--shadow4);
+}
+
+.search-card {
+    background-color: var(--colorNeutralBackground3);
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    box-shadow: var(--shadow2);
+    overflow: hidden;
+}
+
+.search-header {
+    background-color: var(--colorNeutralBackground2);
+    padding: var(--spacingVerticalM) var(--spacingHorizontalL);
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.search-header h4 {
+    font-size: var(--fontSizeBase300);
+    font-weight: var(--fontWeightMedium);
+    color: var(--colorNeutralForeground1);
+    margin: 0;
+    line-height: var(--lineHeightBase300);
+}
+
+.search-content {
+    padding: var(--spacingVerticalL) var(--spacingHorizontalL);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalL);
+}
+
+.search-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: var(--spacingHorizontalM);
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 24px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--colorNeutralBackground5);
+    transition: 0.2s;
+    border-radius: var(--borderRadiusXLarge);
+    border: 1px solid var(--colorNeutralStroke2);
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--colorNeutralForeground1);
+    transition: 0.2s;
+    border-radius: var(--borderRadiusCircular);
+}
+
+input:checked + .slider {
+    background-color: var(--colorBrandBackground);
+    border-color: var(--colorBrandBackground);
+}
+
+input:checked + .slider:before {
+    transform: translateX(24px);
+}
+
+.toggle-label {
+    font-size: var(--fontSizeBase300);
+    color: var(--colorNeutralForeground2);
+    line-height: var(--lineHeightBase300);
+}
+
+.search-options-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalS);
+}
+
+.search-options-container label {
+    font-size: var(--fontSizeBase200);
+    color: var(--colorNeutralForeground2);
+    font-weight: var(--fontWeightMedium);
+    line-height: var(--lineHeightBase200);
+}
+
+.search-count-input {
+    background-color: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    padding: var(--spacingVerticalS) var(--spacingHorizontalM);
+    color: var(--colorNeutralForeground1);
+    font-size: var(--fontSizeBase300);
+    font-family: var(--fontFamilyBase);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    line-height: var(--lineHeightBase300);
+    width: 100%;
+}
+
+.search-count-input:focus {
+    border-color: var(--colorBrandBackground);
+    box-shadow: 0 0 0 2px rgba(0, 132, 255, 0.2);
+}

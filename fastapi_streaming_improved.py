@@ -13,10 +13,14 @@ import os
 import tempfile
 from datetime import datetime
 from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.lib.colors import black, blue, darkgray
+from reportlab.lib.colors import black, blue, darkgray, HexColor
+from reportlab.pdfbase import pdfutils
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from bs4 import BeautifulSoup
 import markdown
 from basic_ollama_agent_with_post import OllamaChat
 from typing import List, Dict, Optional
@@ -133,17 +137,8 @@ def format_message(content: str) -> str:
             }
         }
         
-        # Try to add LaTeX math support if available
-        try:
-            import mdx_math
-            extensions.append('mdx_math')
-            extension_configs['mdx_math'] = {
-                'enable_dollar_delimiter': True,  # Enable $...$ for inline math
-                'add_preview': False  # Don't add preview functionality
-            }
-        except ImportError:
-            print("Warning: mdx_math not available, LaTeX math expressions won't be processed on backend")
-            # LaTeX will still work via frontend KaTeX rendering
+        # LaTeX math expressions are handled by frontend KaTeX rendering
+        # No backend math processing needed
         
         md = markdown.Markdown(
             extensions=extensions,
@@ -725,24 +720,294 @@ async def chat_stream_minimal(chat_message: ChatMessage):
         }
     )
 
-def process_latex_for_pdf(content):
-    """
-    Process LaTeX expressions for PDF generation by converting them to readable text.
-    Since ReportLab doesn't support LaTeX rendering, we'll convert common expressions.
-    """
+# Professional color scheme
+DARK_STEEL_BLUE = HexColor('#4682B4')
+PROFESSIONAL_BLACK = HexColor('#000000')
+
+def register_fonts():
+    """Register fonts for PDF generation with fallback support."""
+    try:
+        # Try to register Segoe UI (Windows/modern systems)
+        # On Linux, we'll try common font paths
+        font_paths = [
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',  # Linux common
+            '/System/Library/Fonts/Helvetica.ttc',  # macOS
+            'C:/Windows/Fonts/segoeui.ttf',  # Windows
+        ]
+        
+        registered_font = None
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                try:
+                    if font_path.endswith('segoeui.ttf'):
+                        pdfmetrics.registerFont(TTFont('SegoeUI', font_path))
+                        registered_font = 'SegoeUI'
+                    elif font_path.endswith('LiberationSans-Regular.ttf'):
+                        pdfmetrics.registerFont(TTFont('SegoeUI', font_path))  # Use Liberation as Segoe UI substitute
+                        registered_font = 'SegoeUI'
+                    break
+                except:
+                    continue
+        
+        # Try Calibri as fallback
+        if not registered_font:
+            calibri_paths = [
+                'C:/Windows/Fonts/calibri.ttf',
+                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+            ]
+            
+            for font_path in calibri_paths:
+                if os.path.exists(font_path):
+                    try:
+                        pdfmetrics.registerFont(TTFont('Calibri', font_path))
+                        registered_font = 'Calibri'
+                        break
+                    except:
+                        continue
+        
+        return registered_font or 'Helvetica'  # Final fallback to built-in
+        
+    except Exception as e:
+        print(f"Font registration failed: {e}")
+        return 'Helvetica'
+
+def parse_html_table(table_html):
+    """Parse HTML table and convert to ReportLab Table data."""
+    soup = BeautifulSoup(table_html, 'html.parser')
+    tables = soup.find_all('table')
+    
+    if not tables:
+        return None
+    
+    # Process the first table found
+    table = tables[0]
+    rows = table.find_all('tr')
+    
+    if not rows:
+        return None
+    
+    data = []
+    for row in rows:
+        cells = row.find_all(['td', 'th'])
+        row_data = []
+        for cell in cells:
+            # Get text content and preserve some formatting
+            cell_text = cell.get_text(strip=True)
+            if cell.name == 'th':
+                cell_text = f"<b>{cell_text}</b>"
+            row_data.append(cell_text)
+        data.append(row_data)
+    
+    return data
+
+def create_professional_table(table_data, primary_font='Helvetica', available_width=None):
+    """Create a professionally styled ReportLab Table that fits within page boundaries with text wrapping."""
+    if not table_data:
+        return None
+    
+    # Calculate available width (now 7.5 inches for letter size with 0.5 inch margins)
+    if available_width is None:
+        available_width = 7.5 * inch
+    
+    # Wrap text in table cells to prevent overflow
+    def wrap_cell_text(text, max_width_chars=50):
+        """Wrap text in table cells to fit within column width."""
+        if not text or len(str(text)) <= max_width_chars:
+            return str(text)
+        
+        # Break long words and wrap text
+        import textwrap
+        wrapped_lines = textwrap.fill(str(text), width=max_width_chars, break_long_words=True)
+        return wrapped_lines
+    
+    # Process table data to wrap text in cells
+    wrapped_table_data = []
+    for row in table_data:
+        wrapped_row = []
+        for cell in row:
+            # Determine max characters based on column count and available width
+            num_cols = len(row)
+            max_chars_per_col = max(20, min(80, int(120 / num_cols)))  # Adaptive character limit
+            wrapped_cell = wrap_cell_text(cell, max_chars_per_col)
+            wrapped_row.append(wrapped_cell)
+        wrapped_table_data.append(wrapped_row)
+    
+    # Calculate column widths based on content and available space
+    if wrapped_table_data:
+        num_cols = len(wrapped_table_data[0])
+        # Use more of the available width with smaller margins
+        col_width = available_width / num_cols
+        col_widths = [col_width] * num_cols
+        
+        # Ensure minimum column width for readability
+        min_col_width = 1.0 * inch
+        if any(w < min_col_width for w in col_widths):
+            col_widths = [max(w, min_col_width) for w in col_widths]
+            # Recalculate if needed
+            total_width = sum(col_widths)
+            if total_width > available_width:
+                scale_factor = available_width / total_width
+                col_widths = [w * scale_factor for w in col_widths]
+    
+    # Create the table with calculated widths and wrapped data
+    table = Table(wrapped_table_data, colWidths=col_widths)
+    
+    # Apply professional styling with enhanced text wrapping
+    table_style = TableStyle([
+        # Header row styling (first row)
+        ('BACKGROUND', (0, 0), (-1, 0), DARK_STEEL_BLUE),
+        ('TEXTCOLOR', (0, 0), (-1, 0), PROFESSIONAL_BLACK),
+        ('FONTNAME', (0, 0), (-1, 0), primary_font),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('FONTWEIGHT', (0, 0), (-1, 0), 'BOLD'),
+        
+        # Data rows styling
+        ('BACKGROUND', (0, 1), (-1, -1), HexColor('#FFFFFF')),
+        ('TEXTCOLOR', (0, 1), (-1, -1), PROFESSIONAL_BLACK),
+        ('FONTNAME', (0, 1), (-1, -1), primary_font),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        
+        # Border and alignment
+        ('GRID', (0, 0), (-1, -1), 1, PROFESSIONAL_BLACK),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        
+        # Padding for better text wrapping
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        
+        # Alternating row colors for better readability
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HexColor('#FFFFFF'), HexColor('#F8F9FA')]),
+        
+        # Enhanced text wrapping and overflow handling
+        ('WORDWRAP', (0, 0), (-1, -1), True),
+        ('SPLITLONGWORDS', (0, 0), (-1, -1), True),
+    ])
+    
+    table.setStyle(table_style)
+    return table
+
+def process_content_with_tables(content, primary_font='Helvetica'):
+    """Process content and extract tables, returning both regular content and table objects."""
+    # Convert markdown to HTML first
+    html_content = markdown.markdown(content, extensions=['tables'])
+    
+    # Parse with BeautifulSoup to handle tables
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    story_elements = []
+    
+    # Process each element in order
+    for element in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'blockquote', 'table', 'pre', 'code']):
+        if element.name == 'table':
+            # Extract table data and create ReportLab table
+            rows = element.find_all('tr')
+            if rows:
+                table_data = []
+                for row in rows:
+                    cells = row.find_all(['td', 'th'])
+                    row_data = []
+                    for cell in cells:
+                        cell_text = cell.get_text(strip=True)
+                        row_data.append(cell_text)
+                    table_data.append(row_data)
+                
+                if table_data:
+                    table_obj = create_professional_table(table_data, primary_font, available_width=7.5*inch)
+                    if table_obj:
+                        story_elements.append(('table', table_obj))
+        else:
+            # Handle other elements as HTML text
+            element_html = str(element)
+            story_elements.append(('html', element_html))
+    
+    # If no specific elements found, process as regular content
+    if not story_elements:
+        story_elements.append(('html', html_content))
+    
+    return story_elements
+
+def process_html_for_reportlab(html_content):
+    """Process HTML content for ReportLab compatibility with professional formatting."""
+    # Handle math expressions first to prevent character splitting
+    # Look for common LaTeX patterns and preserve them as single units
     import re
     
-    # Convert display math $$...$$ to text representation
-    content = re.sub(r'\$\$(.*?)\$\$', r'\n[MATH: \1]\n', content, flags=re.DOTALL)
+    # Preserve inline math expressions (between $ $ or \( \))
+    math_patterns = [
+        (r'\$([^$]+)\$', r'<i>\1</i>'),  # $expression$ -> italic
+        (r'\\?\(([^)]+)\\\)', r'<i>\1</i>'),  # \(expression\) -> italic
+        (r'\\?\[([^]]+)\\\]', r'<i>\1</i>'),  # \[expression\] -> italic
+    ]
     
-    # Convert inline math $...$ to text representation
-    content = re.sub(r'\$([^$]+)\$', r'[MATH: \1]', content)
+    for pattern, replacement in math_patterns:
+        html_content = re.sub(pattern, replacement, html_content)
     
-    # Convert LaTeX brackets \[...\] to text representation
-    content = re.sub(r'\\?\[(.*?)\\?\]', r'\n[MATH: \1]\n', content, flags=re.DOTALL)
+    # Clean up HTML tags for ReportLab
+    html_content = html_content.replace('<p>', '').replace('</p>', '<br/><br/>')
+    html_content = html_content.replace('<strong>', '<b>').replace('</strong>', '</b>')
+    html_content = html_content.replace('<em>', '<i>').replace('</em>', '</i>')
+    html_content = html_content.replace('<code>', '<font name="Courier"><b>').replace('</code>', '</b></font>')
     
-    # Convert LaTeX parentheses \(...\) to text representation
-    content = re.sub(r'\\?\((.*?)\\?\)', r'[MATH: \1]', content)
+    # Handle headers with 2-tier font system (header size vs body size)
+    html_content = html_content.replace('<h1>', '<b><font size="14">').replace('</h1>', '</font></b><br/><br/>')
+    html_content = html_content.replace('<h2>', '<b><font size="13">').replace('</h2>', '</font></b><br/><br/>')
+    html_content = html_content.replace('<h3>', '<b><font size="12">').replace('</h3>', '</font></b><br/>')
+    html_content = html_content.replace('<h4>', '<b><font size="11">').replace('</h4>', '</font></b><br/>')
+    
+    # Handle lists with professional formatting
+    html_content = html_content.replace('<ul>', '<br/>').replace('</ul>', '<br/>')
+    html_content = html_content.replace('<ol>', '<br/>').replace('</ol>', '<br/>')
+    html_content = html_content.replace('<li>', '  • ').replace('</li>', '<br/>')
+    
+    # Handle blockquotes professionally
+    html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
+    
+    # Remove/replace images with professional placeholders
+    html_content = re.sub(r'<img[^>]*alt=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image: \1]', html_content)
+    html_content = re.sub(r'<img[^>]*src=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image]', html_content)
+    html_content = re.sub(r'<img[^>]*/?>', '[Image]', html_content)
+    
+    # Clean up extra line breaks but preserve intentional spacing
+    html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
+    
+    # Fix math expressions that might have been split
+    # Remove unwanted line breaks in mathematical expressions
+    html_content = re.sub(r'<i>([^<]+)</i>', lambda m: '<i>' + m.group(1).replace('\n', ' ').replace('<br/>', ' ') + '</i>', html_content)
+    
+    return html_content
+
+def process_latex_for_pdf(content):
+    """
+    Process LaTeX expressions for PDF generation while preserving formatting.
+    Converts LaTeX to more readable format without breaking into separate lines.
+    """
+    # Handle LaTeX expressions more carefully to avoid line breaks
+    import re
+    
+    # Replace common LaTeX patterns with readable text, keeping them as single units
+    latex_replacements = [
+        (r'\$\$([^$]+)\$\$', r'[\1]'),  # Display math -> [expression]
+        (r'\$([^$]+)\$', r'\1'),        # Inline math -> expression
+        (r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1)/(\2)'),  # Fractions
+        (r'\\sqrt\{([^}]+)\}', r'sqrt(\1)'),              # Square roots
+        (r'\\sum_?\{?([^}]*)\}?', r'sum(\1)'),            # Summations
+        (r'\\int_?\{?([^}]*)\}?', r'integral(\1)'),       # Integrals
+        (r'\\alpha', 'α'),
+        (r'\\beta', 'β'),
+        (r'\\gamma', 'γ'),
+        (r'\\delta', 'δ'),
+        (r'\\pi', 'π'),
+        (r'\\theta', 'θ'),
+        (r'\\lambda', 'λ'),
+        (r'\\mu', 'μ'),
+        (r'\\sigma', 'σ'),
+    ]
+    
+    for pattern, replacement in latex_replacements:
+        content = re.sub(pattern, replacement, content)
     
     return content
 
@@ -796,8 +1061,12 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
         - Schedules temporary file cleanup after download.
         - Returns the PDF as a downloadable file response.
     """
-    """Generate and download chat conversation as PDF with markdown formatting."""
+    """Generate and download chat conversation as PDF with professional formatting and table support."""
     try:
+        # Register fonts with Segoe UI preference and Calibri fallback
+        primary_font = register_fonts()
+        print(f"Using font: {primary_font}")
+        
         # Get conversation messages
         messages = []
         for msg in chat_agent.get_history():
@@ -815,159 +1084,154 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
         filename = f"chat-export-{timestamp}.pdf"
         filepath = os.path.join(temp_dir, filename)
         
-        # Create PDF document
+        # Create PDF document with reduced margins (0.5 inch on sides)
         doc = SimpleDocTemplate(
             filepath,
             pagesize=letter,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=1*inch,
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=1.2*inch,
             bottomMargin=1*inch
         )
         
-        # Get styles
+        # Professional style definitions with 2-tier font system
         styles = getSampleStyleSheet()
         
-        # Custom styles
+        # Header font size (for titles, headers)
+        HEADER_FONT_SIZE = 14
+        # Body font size (for content)
+        BODY_FONT_SIZE = 10
+        
         title_style = ParagraphStyle(
-            'CustomTitle',
+            'ProfessionalTitle',
             parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=20,
-            textColor=black,
-            alignment=1  # Center alignment
+            fontSize=22,  # Larger for main title
+            fontName=primary_font,
+            textColor=PROFESSIONAL_BLACK,
+            spaceAfter=24,
+            alignment=1,  # Center alignment
+            spaceBefore=0
         )
         
         metadata_style = ParagraphStyle(
-            'MetadataStyle',
+            'ProfessionalMetadata',
             parent=styles['Normal'],
-            fontSize=10,
-            textColor=darkgray,
-            spaceAfter=6
+            fontSize=BODY_FONT_SIZE,
+            fontName=primary_font,
+            textColor=DARK_STEEL_BLUE,
+            spaceAfter=8,
+            leftIndent=0
         )
         
         user_header_style = ParagraphStyle(
             'UserHeader',
-            parent=styles['Heading3'],
-            fontSize=12,
-            textColor=blue,
-            spaceBefore=12,
+            parent=styles['Heading2'],
+            fontSize=HEADER_FONT_SIZE,  # Header tier font size
+            fontName=primary_font,
+            textColor=DARK_STEEL_BLUE,
+            spaceBefore=18,
             spaceAfter=6,
-            leftIndent=0
+            leftIndent=0,
+            fontWeight='BOLD'  # Make explicitly bold
         )
         
         assistant_header_style = ParagraphStyle(
             'AssistantHeader',
-            parent=styles['Heading3'],
-            fontSize=12,
-            textColor=darkgray,
-            spaceBefore=12,
+            parent=styles['Heading2'],
+            fontSize=HEADER_FONT_SIZE,  # Header tier font size
+            fontName=primary_font,
+            textColor=PROFESSIONAL_BLACK,
+            spaceBefore=18,
             spaceAfter=6,
-            leftIndent=0
+            leftIndent=0,
+            fontWeight='BOLD'  # Make explicitly bold
         )
         
         content_style = ParagraphStyle(
-            'ContentStyle',
+            'ProfessionalContent',
             parent=styles['Normal'],
-            fontSize=10,
-            leftIndent=20,
-            spaceAfter=8,
-            spaceBefore=4,
+            fontSize=BODY_FONT_SIZE,  # Body tier font size
+            fontName=primary_font,
+            textColor=PROFESSIONAL_BLACK,
+            leftIndent=12,
+            spaceAfter=10,
+            spaceBefore=2,
             leading=14,
             allowWidows=0,
             allowOrphans=0
         )
         
         code_style = ParagraphStyle(
-            'CodeStyle',
+            'ProfessionalCode',
             parent=styles['Code'],
-            fontSize=9,
-            leftIndent=30,
-            spaceAfter=8,
-            spaceBefore=4,
-            backgroundColor='#f5f5f5',
+            fontSize=BODY_FONT_SIZE - 1,  # Slightly smaller than body
             fontName='Courier',
+            textColor=PROFESSIONAL_BLACK,
+            leftIndent=20,
+            spaceAfter=12,
+            spaceBefore=6,
+            backgroundColor=HexColor('#F8F9FA'),
             borderWidth=1,
-            borderColor=darkgray,
-            borderPadding=6
+            borderColor=DARK_STEEL_BLUE,
+            borderPadding=8
         )
         
         # Build PDF content
         story = []
         
-        # Title
+        # Professional title
         story.append(Paragraph("Chat Conversation Export", title_style))
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 16))
         
-        # Metadata
+        # Metadata with professional formatting
         now = datetime.now()
-        story.append(Paragraph(f"<b>Exported:</b> {now.strftime('%Y-%m-%d %H:%M:%S')}", metadata_style))
-        story.append(Paragraph(f"<b>Model:</b> {chat_agent.model}", metadata_style))
-        story.append(Paragraph(f"<b>Total Messages:</b> {len(messages)}", metadata_style))
-        story.append(Spacer(1, 20))
+        story.append(Paragraph(f"<b>Export Date:</b> {now.strftime('%B %d, %Y at %I:%M %p')}", metadata_style))
+        story.append(Paragraph(f"<b>AI Model:</b> {chat_agent.model}", metadata_style))
+        story.append(Paragraph(f"<b>Message Count:</b> {len(messages)}", metadata_style))
+        story.append(Spacer(1, 24))
         
-        # Process each message
+        # Process each message with enhanced table support
         for i, message in enumerate(messages):
-            # Message header
+            # Bold, bigger message headers with proper 2-tier font system
             if message['type'] == 'user':
-                story.append(Paragraph("👤 <b>User:</b>", user_header_style))
+                story.append(Paragraph(f'<b><font size="{HEADER_FONT_SIZE}">User</font></b>', user_header_style))
             else:
-                story.append(Paragraph("🤖 <b>Assistant:</b>", assistant_header_style))
+                story.append(Paragraph(f'<b><font size="{HEADER_FONT_SIZE}">Assistant</font></b>', assistant_header_style))
             
-            # Process content - preserve markdown formatting and order
+            # Process content with full table and formatting support
             content = message['content']
             
             try:
                 # Handle think tags specially for PDF generation
                 content = process_think_tags_for_pdf(content)
                 
-                # Handle content with code blocks while preserving order
+                # Process content with tables and mixed formatting
                 if '```' in content:
+                    # Handle code blocks separately from table processing
                     parts = content.split('```')
                     
                     for j, part in enumerate(parts):
-                        if j % 2 == 0:  # Regular text (not code)
+                        if j % 2 == 0:  # Regular content (may include tables)
                             if part.strip():
-                                # Process markdown for regular text
-                                html_content = markdown.markdown(part.strip())
-                                # Clean up HTML tags for ReportLab
-                                html_content = html_content.replace('<p>', '').replace('</p>', '<br/><br/>')
-                                html_content = html_content.replace('<strong>', '<b>').replace('</strong>', '</b>')
-                                html_content = html_content.replace('<em>', '<i>').replace('</em>', '</i>')
-                                html_content = html_content.replace('<code>', '<font name="Courier"><b>').replace('</code>', '</b></font>')
+                                # Process with table support
+                                story_elements = process_content_with_tables(part.strip(), primary_font)
                                 
-                                # Handle headers with proper formatting
-                                html_content = html_content.replace('<h1>', '<b><font size="14">').replace('</h1>', '</font></b><br/><br/>')
-                                html_content = html_content.replace('<h2>', '<b><font size="12">').replace('</h2>', '</font></b><br/><br/>')
-                                html_content = html_content.replace('<h3>', '<b><font size="11">').replace('</h3>', '</font></b><br/>')
-                                html_content = html_content.replace('<h4>', '<b>').replace('</h4>', '</b><br/>')
-                                
-                                # Handle lists with better formatting
-                                html_content = html_content.replace('<ul>', '<br/>').replace('</ul>', '<br/>')
-                                html_content = html_content.replace('<ol>', '<br/>').replace('</ol>', '<br/>')
-                                html_content = html_content.replace('<li>', '  • ').replace('</li>', '<br/>')
-                                
-                                # Handle blockquotes
-                                html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
-                                
-                                # Handle image tags - remove them or replace with text since ReportLab can't handle them easily
-                                # Replace img tags with [Image] placeholder or remove them entirely
-                                html_content = re.sub(r'<img[^>]*alt=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image: \1]', html_content)
-                                html_content = re.sub(r'<img[^>]*src=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image]', html_content)
-                                html_content = re.sub(r'<img[^>]*/?>', '[Image]', html_content)
-                                
-                                # Clean up extra line breaks
-                                html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
-                                
-                                if html_content.strip():
-                                    try:
-                                        story.append(Paragraph(html_content, content_style))
-                                    except Exception as para_error:
-                                        # If ReportLab's Paragraph fails to parse HTML, fall back to plain text
-                                        print(f"ReportLab Paragraph error: {para_error}")
-                                        # Strip HTML tags and use plain text
-                                        plain_text = re.sub(r'<[^>]+>', '', html_content)
-                                        story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
+                                for element_type, element in story_elements:
+                                    if element_type == 'table':
+                                        story.append(Spacer(1, 8))
+                                        story.append(element)
+                                        story.append(Spacer(1, 8))
+                                    elif element_type == 'html':
+                                        # Process HTML content
+                                        processed_html = process_html_for_reportlab(element)
+                                        if processed_html.strip():
+                                            try:
+                                                story.append(Paragraph(processed_html, content_style))
+                                            except Exception as para_error:
+                                                print(f"ReportLab Paragraph error: {para_error}")
+                                                plain_text = re.sub(r'<[^>]+>', '', processed_html)
+                                                story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
+                        
                         else:  # Code block
                             if part.strip():
                                 # Extract language and code
@@ -975,78 +1239,53 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
                                 language = ""
                                 code_lines = lines
                                 
-                                # Check if first line is a language identifier
                                 if lines and not any(char.isspace() for char in lines[0]) and len(lines[0]) < 20:
                                     language = lines[0]
                                     code_lines = lines[1:]
                                 
                                 code_text = '\n'.join(code_lines)
                                 
-                                # Add code block with language label if present
+                                # Add code block with professional styling
                                 if language:
-                                    story.append(Paragraph(f"<b>Code ({language}):</b>", content_style))
+                                    story.append(Paragraph(f"<b>Code ({language})</b>", content_style))
                                 else:
-                                    story.append(Paragraph("<b>Code:</b>", content_style))
+                                    story.append(Paragraph("<b>Code</b>", content_style))
                                 
                                 story.append(Preformatted(code_text, code_style))
-                                story.append(Spacer(1, 6))  # Small space after code block
                 
                 else:
-                    # No code blocks, process as regular markdown
-                    html_content = markdown.markdown(content)
+                    # Process content without code blocks but with table support
+                    story_elements = process_content_with_tables(content, primary_font)
                     
-                    # Clean up HTML for ReportLab with better formatting
-                    html_content = html_content.replace('<p>', '').replace('</p>', '<br/><br/>')
-                    html_content = html_content.replace('<strong>', '<b>').replace('</strong>', '</b>')
-                    html_content = html_content.replace('<em>', '<i>').replace('</em>', '</i>')
-                    html_content = html_content.replace('<code>', '<font name="Courier"><b>').replace('</code>', '</b></font>')
-                    
-                    # Handle headers with proper sizing
-                    html_content = html_content.replace('<h1>', '<b><font size="14">').replace('</h1>', '</font></b><br/><br/>')
-                    html_content = html_content.replace('<h2>', '<b><font size="12">').replace('</h2>', '</font></b><br/><br/>')
-                    html_content = html_content.replace('<h3>', '<b><font size="11">').replace('</h3>', '</font></b><br/>')
-                    html_content = html_content.replace('<h4>', '<b>').replace('</h4>', '</b><br/>')
-                    
-                    # Handle lists with better formatting
-                    html_content = html_content.replace('<ul>', '<br/>').replace('</ul>', '<br/>')
-                    html_content = html_content.replace('<ol>', '<br/>').replace('</ol>', '<br/>')
-                    html_content = html_content.replace('<li>', '  • ').replace('</li>', '<br/>')
-                    
-                    # Handle blockquotes
-                    html_content = html_content.replace('<blockquote>', '<i>"').replace('</blockquote>', '"</i><br/>')
-                    
-                    # Handle image tags - remove them or replace with text since ReportLab can't handle them easily
-                    # Replace img tags with [Image] placeholder or remove them entirely
-                    html_content = re.sub(r'<img[^>]*alt=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image: \1]', html_content)
-                    html_content = re.sub(r'<img[^>]*src=["\']([^"\'][^>]*?)["\'][^>]*/?>', r'[Image]', html_content)
-                    html_content = re.sub(r'<img[^>]*/?>', '[Image]', html_content)
-                    
-                    # Clean up extra line breaks
-                    html_content = html_content.replace('<br/><br/><br/>', '<br/><br/>')
-                    
-                    if html_content.strip():
-                        try:
-                            story.append(Paragraph(html_content, content_style))
-                        except Exception as para_error:
-                            # If ReportLab's Paragraph fails to parse HTML, fall back to plain text
-                            print(f"ReportLab Paragraph error: {para_error}")
-                            # Strip HTML tags and use plain text
-                            plain_text = re.sub(r'<[^>]+>', '', html_content)
-                            story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
+                    for element_type, element in story_elements:
+                        if element_type == 'table':
+                            story.append(Spacer(1, 8))
+                            story.append(element)
+                            story.append(Spacer(1, 8))
+                        elif element_type == 'html':
+                            # Process HTML content with professional formatting
+                            processed_html = process_html_for_reportlab(element)
+                            if processed_html.strip():
+                                try:
+                                    story.append(Paragraph(processed_html, content_style))
+                                except Exception as para_error:
+                                    print(f"ReportLab Paragraph error: {para_error}")
+                                    plain_text = re.sub(r'<[^>]+>', '', processed_html)
+                                    story.append(Paragraph(plain_text.replace('\n', '<br/>'), content_style))
                     
             except Exception as e:
-                # Fallback to plain text if markdown processing fails
-                print(f"Error processing markdown: {e}")
+                # Fallback to plain text if processing fails
+                print(f"Error processing content: {e}")
                 story.append(Paragraph(content.replace('\n', '<br/>'), content_style))
             
-            # Add space between messages
+            # Add professional spacing between messages
             if i < len(messages) - 1:
-                story.append(Spacer(1, 15))
+                story.append(Spacer(1, 20))
         
-        # Build PDF
+        # Build PDF with professional formatting
         doc.build(story)
         
-        # Add cleanup task to background tasks
+        # Add cleanup task
         def cleanup_file():
             try:
                 os.unlink(filepath)
@@ -1066,6 +1305,7 @@ async def download_chat_pdf(background_tasks: BackgroundTasks):
     except Exception as e:
         print(f"Error generating PDF: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating PDF: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn
