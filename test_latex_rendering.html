@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LaTeX Rendering Test</title>
+    <!-- KaTeX CSS and JS -->
+    <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
+    <script src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://unpkg.com/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- External CSS -->
+    <link rel="stylesheet" href="/static/styles.css?v=fluent2">
+    <style>
+        body {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--colorNeutralBackground1);
+            color: var(--colorNeutralForeground1);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid var(--colorNeutralStroke2);
+            border-radius: var(--borderRadiusMedium);
+            background: var(--colorNeutralBackground2);
+        }
+        h2 {
+            color: var(--colorBrandBackground);
+            margin-top: 0;
+        }
+        .math-test {
+            margin: 10px 0;
+            padding: 10px;
+            background: var(--colorNeutralBackground1);
+            border-radius: var(--borderRadiusSmall);
+        }
+        pre {
+            background: var(--colorNeutralBackground3);
+            padding: 10px;
+            border-radius: var(--borderRadiusSmall);
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: var(--colorNeutralForeground2);
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>LaTeX Math Rendering Test</h1>
+    
+    <div class="test-section">
+        <h2>Inline Math Examples</h2>
+        
+        <div class="math-test">
+            <h3>Simple inline math:</h3>
+            <p>The quadratic formula is $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$ where $a \neq 0$.</p>
+        </div>
+        
+        <div class="math-test">
+            <h3>Variables and subscripts:</h3>
+            <p>Einstein's mass-energy equivalence: $E = mc^2$ and the sum $\sum_{i=1}^{n} x_i$.</p>
+        </div>
+        
+        <div class="math-test">
+            <h3>Greek letters:</h3>
+            <p>Common constants: $\pi \approx 3.14159$, $e \approx 2.71828$, and $\phi = \frac{1 + \sqrt{5}}{2}$.</p>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Display Math Examples</h2>
+        
+        <div class="math-test">
+            <h3>Centered equations:</h3>
+            $$\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}$$
+        </div>
+        
+        <div class="math-test">
+            <h3>Matrix equation:</h3>
+            $$\begin{pmatrix} a & b \\ c & d \end{pmatrix} \begin{pmatrix} x \\ y \end{pmatrix} = \begin{pmatrix} ax + by \\ cx + dy \end{pmatrix}$$
+        </div>
+        
+        <div class="math-test">
+            <h3>Complex fraction:</h3>
+            $$f(x) = \frac{1}{1 + \frac{1}{1 + \frac{1}{1 + \cdots}}}$$
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>LaTeX Brackets Examples</h2>
+        
+        <div class="math-test">
+            <h3>Using \[...\] syntax:</h3>
+            \[
+            \lim_{n \to \infty} \left(1 + \frac{1}{n}\right)^n = e
+            \]
+        </div>
+        
+        <div class="math-test">
+            <h3>Using \(...\) syntax:</h3>
+            <p>The derivative of \(f(x) = x^2\) is \(f'(x) = 2x\).</p>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Mixed Content Examples</h2>
+        
+        <div class="math-test">
+            <h3>Code and Math together:</h3>
+            <pre><code>function quadratic(a, b, c) {
+    let discriminant = b*b - 4*a*c;
+    return (-b + Math.sqrt(discriminant)) / (2*a);
+}</code></pre>
+            <p>This implements the quadratic formula: $x = \frac{-b + \sqrt{b^2 - 4ac}}{2a}$</p>
+        </div>
+        
+        <div class="math-test">
+            <h3>List with math:</h3>
+            <ul>
+                <li>First equation: $y = mx + b$</li>
+                <li>Second equation: $ax^2 + bx + c = 0$</li>
+                <li>Third equation: $\sin^2(x) + \cos^2(x) = 1$</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Render all LaTeX math expressions on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false},
+                    {left: '\\[', right: '\\]', display: true},
+                    {left: '\\(', right: '\\)', display: false}
+                ],
+                throwOnError: false,
+                errorColor: '#cc0000',
+                strict: false,
+                trust: false,
+                ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+                ignoredClasses: ['hljs', 'language-*']
+            });
+        });
+    </script>
+</body>
+</html>

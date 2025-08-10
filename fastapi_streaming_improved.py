@@ -110,28 +110,44 @@ def highlight_code_block(code: str, language: str = '') -> str:
 
 def format_message(content: str) -> str:
     """
-    Format message content with markdown processing and syntax highlighting.
+    Format message content with markdown processing, LaTeX math, and syntax highlighting.
     Migrated from frontend JavaScript to backend Python.
     """
     try:
         # Process think tags first before markdown parsing
         processed_content = process_think_tags(content)
         
-        # Configure markdown with extensions
-        md = markdown.Markdown(
-            extensions=[
-                'codehilite',
-                'fenced_code', 
-                'tables',
-                'toc',
-                'nl2br'
-            ],
-            extension_configs={
-                'codehilite': {
-                    'css_class': 'highlight',
-                    'use_pygments': PYGMENTS_AVAILABLE
-                }
+        # Configure markdown with extensions including LaTeX math support
+        extensions = [
+            'codehilite',
+            'fenced_code', 
+            'tables',
+            'toc',
+            'nl2br'
+        ]
+        
+        extension_configs = {
+            'codehilite': {
+                'css_class': 'highlight',
+                'use_pygments': PYGMENTS_AVAILABLE
             }
+        }
+        
+        # Try to add LaTeX math support if available
+        try:
+            import mdx_math
+            extensions.append('mdx_math')
+            extension_configs['mdx_math'] = {
+                'enable_dollar_delimiter': True,  # Enable $...$ for inline math
+                'add_preview': False  # Don't add preview functionality
+            }
+        except ImportError:
+            print("Warning: mdx_math not available, LaTeX math expressions won't be processed on backend")
+            # LaTeX will still work via frontend KaTeX rendering
+        
+        md = markdown.Markdown(
+            extensions=extensions,
+            extension_configs=extension_configs
         )
         
         # Parse markdown
@@ -709,12 +725,36 @@ async def chat_stream_minimal(chat_message: ChatMessage):
         }
     )
 
+def process_latex_for_pdf(content):
+    """
+    Process LaTeX expressions for PDF generation by converting them to readable text.
+    Since ReportLab doesn't support LaTeX rendering, we'll convert common expressions.
+    """
+    import re
+    
+    # Convert display math $$...$$ to text representation
+    content = re.sub(r'\$\$(.*?)\$\$', r'\n[MATH: \1]\n', content, flags=re.DOTALL)
+    
+    # Convert inline math $...$ to text representation
+    content = re.sub(r'\$([^$]+)\$', r'[MATH: \1]', content)
+    
+    # Convert LaTeX brackets \[...\] to text representation
+    content = re.sub(r'\\?\[(.*?)\\?\]', r'\n[MATH: \1]\n', content, flags=re.DOTALL)
+    
+    # Convert LaTeX parentheses \(...\) to text representation
+    content = re.sub(r'\\?\((.*?)\\?\)', r'[MATH: \1]', content)
+    
+    return content
+
 def process_think_tags_for_pdf(content):
     """
     Process think tags for PDF generation by converting them to readable format.
     Removes HTML formatting and converts to markdown-friendly format.
     """
     import re
+    
+    # First process LaTeX expressions
+    content = process_latex_for_pdf(content)
     
     # Check if content starts with <think> and contains </think>
     think_regex = r'^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$'

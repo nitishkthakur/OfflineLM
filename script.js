@@ -61,7 +61,11 @@ function streamingChatApp() {
                     this.updateStatsFromBackend(data.stats);
                 }
                 
-                this.$nextTick(() => this.forceScrollToBottom());
+                this.$nextTick(() => {
+                    this.forceScrollToBottom();
+                    // Render LaTeX for loaded messages
+                    this.renderLaTeX();
+                });
             } catch (error) {
                 console.error('Error loading messages:', error);
                 this.statusMessage = 'Error loading messages';
@@ -76,12 +80,17 @@ function streamingChatApp() {
                 if (typeof marked !== 'undefined') {
                     const processedContent = this.processThinkTags(content);
                     let html = marked.parse(processedContent);
+                    
+                    // Apply syntax highlighting
                     setTimeout(() => {
                         if (typeof hljs !== 'undefined') {
                             document.querySelectorAll('pre code').forEach((block) => {
                                 hljs.highlightElement(block);
                             });
                         }
+                        
+                        // Apply LaTeX rendering after syntax highlighting
+                        this.renderLaTeX();
                     }, 0);
                     return html;
                 } else {
@@ -138,6 +147,32 @@ function streamingChatApp() {
             // This function returns clean content suitable for backend processing
             // It preserves think tags in their original form for proper PDF generation
             return content; // Raw content is already clean - no HTML processing needed
+        },
+
+        renderLaTeX() {
+            // Render LaTeX expressions using KaTeX
+            if (typeof renderMathInElement !== 'undefined') {
+                try {
+                    renderMathInElement(document.getElementById('chat-messages'), {
+                        delimiters: [
+                            {left: '$$', right: '$$', display: true},
+                            {left: '$', right: '$', display: false},
+                            {left: '\\[', right: '\\]', display: true},
+                            {left: '\\(', right: '\\)', display: false}
+                        ],
+                        // Options for better integration with existing content
+                        throwOnError: false,
+                        errorColor: '#cc0000',
+                        strict: false,
+                        trust: false,
+                        // Avoid conflicts with code blocks
+                        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+                        ignoredClasses: ['hljs', 'language-*']
+                    });
+                } catch (error) {
+                    console.warn('LaTeX rendering error:', error);
+                }
+            }
         },
         
         async sendMessage() {
@@ -220,7 +255,11 @@ function streamingChatApp() {
                                 }
                             }
                             this.statusMessage = 'Streaming response...';
-                            this.$nextTick(() => this.scrollToBottom());
+                            this.$nextTick(() => {
+                                this.scrollToBottom();
+                                // Render LaTeX during streaming
+                                this.renderLaTeX();
+                            });
                             
                         } else if (data.type === 'done') {
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
@@ -245,6 +284,8 @@ function streamingChatApp() {
                             
                             // Return focus to input box after response is complete
                             this.$nextTick(() => {
+                                // Final LaTeX rendering for completed message
+                                this.renderLaTeX();
                                 const inputElement = document.querySelector('.chat-input');
                                 if (inputElement) {
                                     inputElement.focus();

@@ -805,3 +805,87 @@ body {
     0%, 100% { opacity: 0.8; }
     50% { opacity: 0.4; }
 }
+
+/* LaTeX/KaTeX Math Expressions Styling */
+.katex {
+    color: var(--colorNeutralForeground1) !important;
+    font-size: 1.1em;
+}
+
+.katex-display {
+    margin: var(--spacingVerticalM) 0;
+    text-align: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.katex-display > .katex {
+    display: inline-block;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Inline math expressions */
+.katex.katex-inline {
+    margin: 0 var(--spacingHorizontalXXS);
+    font-size: 1em;
+}
+
+/* Dark theme adjustments for KaTeX */
+.katex .rule {
+    border-bottom-color: var(--colorNeutralForeground2);
+}
+
+.katex .frac-line {
+    border-bottom-color: var(--colorNeutralForeground2);
+}
+
+.katex .sqrt > .root {
+    border-color: var(--colorNeutralForeground2);
+}
+
+.katex .accent-body {
+    color: var(--colorNeutralForeground1);
+}
+
+.katex .mord {
+    color: var(--colorNeutralForeground1);
+}
+
+.katex .mrel {
+    color: var(--colorNeutralForeground2);
+}
+
+.katex .mop {
+    color: var(--colorNeutralForeground1);
+}
+
+.katex .mbin {
+    color: var(--colorNeutralForeground2);
+}
+
+.katex .mopen, .katex .mclose {
+    color: var(--colorNeutralForeground2);
+}
+
+.katex .msupsub {
+    color: var(--colorNeutralForeground1);
+}
+
+/* Ensure math expressions are visible during streaming */
+.message.streaming .katex {
+    opacity: 1;
+}
+
+/* Mobile responsiveness for math expressions */
+@media (max-width: 768px) {
+    .katex-display {
+        margin: var(--spacingVerticalS) 0;
+        padding: 0 var(--spacingHorizontalS);
+        overflow-x: auto;
+    }
+    
+    .katex {
+        font-size: 0.9em;
+    }
+}
