@@ -451,6 +451,200 @@ class OllamaChat:
         """Get the current conversation history."""
         return self.conversation_history.copy()
 
+
+class GroqChat:
+    """
+    A simple chat class for interacting with Groq models with conversation history.
+    Mirrors OllamaChat functionality but uses Groq API.
+    """
+    
+    def __init__(
+        self,
+        model: str = "llama-3.3-70b-versatile",
+        api_key: Optional[str] = None,
+    ):
+        """
+        Initialize the Groq Chat.
+        
+        Args:
+            model: Name of the Groq model to use
+            api_key: Groq API key (if None, will try to get from environment)
+        """
+        try:
+            from groq import Groq
+            import os
+            # Try to load .env file if python-dotenv is available
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+            except ImportError:
+                pass  # python-dotenv not available, continue without it
+        except ImportError:
+            raise ImportError("groq package is required. Install with: pip install groq")
+        
+        self.model = model
+        self.api_key = api_key or os.getenv("GROQ_API_KEY") or os.getenv("GROK_API_KEY")
+        
+        if not self.api_key:
+            raise ValueError("GROQ_API_KEY or GROK_API_KEY must be provided or set in environment variables")
+        
+        self.client = Groq(api_key=self.api_key)
+        self.conversation_history = []
+
+    def chat(self, prompt: str, conversation_history: List[Dict[str, str]] = None) -> str:
+        """
+        Send a message to the model and get a response while maintaining conversation history.
+        
+        Args:
+            prompt: The user's message
+            conversation_history: Optional conversation history to use instead of instance history
+            
+        Returns:
+            The model's response as a string
+        """
+        try:
+            if conversation_history is not None:
+                self.conversation_history = conversation_history
+
+            # Add user message to history
+            self.conversation_history.append({'role': 'user', 'content': prompt})
+            
+            # Make the request to Groq
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history,
+                temperature=0.7,
+                max_tokens=2048
+            )
+            
+            # Extract the assistant's response
+            assistant_message = completion.choices[0].message.content
+            
+            # Add assistant response to history
+            self.conversation_history.append({'role': 'assistant', 'content': assistant_message})
+            
+            return assistant_message
+            
+        except Exception as e:
+            error_msg = f"Error in Groq chat: {str(e)}"
+            # Don't add error to conversation history
+            return error_msg
+
+    def chat_stream(self, prompt: str, conversation_history: List[Dict[str, str]] = None) -> Generator[str, None, None]:
+        """
+        Send a message to the model and get a streaming response while maintaining conversation history.
+        
+        Args:
+            prompt: The user's message
+            conversation_history: Optional conversation history to use instead of instance history
+            
+        Yields:
+            Chunks of the model's response as they are generated
+        """
+        try:
+            if conversation_history is not None:
+                self.conversation_history = conversation_history
+
+            # Add user message to history
+            self.conversation_history.append({'role': 'user', 'content': prompt})
+            
+            # Make the streaming request to Groq
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history,
+                temperature=0.7,
+                max_tokens=2048,
+                stream=True
+            )
+            
+            full_response = ""
+            
+            # Process the streaming response
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    content_chunk = chunk.choices[0].delta.content
+                    full_response += content_chunk
+                    yield content_chunk
+            
+            # Add the complete assistant response to history
+            if full_response:
+                self.conversation_history.append({'role': 'assistant', 'content': full_response})
+            
+        except Exception as e:
+            error_msg = f"Error in Groq streaming chat: {str(e)}"
+            yield error_msg
+    
+    async def chat_stream_async(self, prompt: str, conversation_history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
+        """
+        Async version of chat_stream for use with async web frameworks like FastAPI.
+        
+        Args:
+            prompt: The user's message
+            conversation_history: Optional conversation history to use instead of instance history
+            
+        Yields:
+            Chunks of the model's response as they are generated
+        """
+        import asyncio
+        
+        try:
+            if conversation_history is not None:
+                self.conversation_history = conversation_history
+
+            # Add user message to history
+            self.conversation_history.append({'role': 'user', 'content': prompt})
+            
+            # Run the synchronous streaming in a thread to make it async-compatible
+            def _sync_stream():
+                try:
+                    stream = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=self.conversation_history,
+                        temperature=0.7,
+                        max_tokens=2048,
+                        stream=True
+                    )
+                    
+                    full_response = ""
+                    chunks = []
+                    
+                    for chunk in stream:
+                        if chunk.choices[0].delta.content is not None:
+                            content_chunk = chunk.choices[0].delta.content
+                            full_response += content_chunk
+                            chunks.append(content_chunk)
+                    
+                    return chunks, full_response
+                except Exception as e:
+                    return [f"Error in Groq async streaming chat: {str(e)}"], ""
+            
+            # Run in thread pool to avoid blocking
+            chunks, full_response = await asyncio.get_event_loop().run_in_executor(None, _sync_stream)
+            
+            # Yield chunks
+            for chunk in chunks:
+                yield chunk
+            
+            # Add the complete assistant response to history
+            if full_response and not full_response.startswith("Error"):
+                self.conversation_history.append({'role': 'assistant', 'content': full_response})
+            
+        except Exception as e:
+            error_msg = f"Error in Groq async streaming chat: {str(e)}"
+            yield error_msg
+
+    def clear_history(self):
+        """Clear the conversation history."""
+        self.conversation_history = []
+    
+    def get_history(self) -> List[Dict[str, str]]:
+        """Get the current conversation history."""
+        return self.conversation_history.copy()
+    
+    def start_new_chat(self):
+        """Start a new chat by clearing the conversation history."""
+        self.clear_history()
+
 # Example usage:
 if __name__ == "__main__":
     # Example tool functions
