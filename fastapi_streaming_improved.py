@@ -22,7 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from bs4 import BeautifulSoup
 import markdown
-from basic_ollama_agent_with_post import OllamaChat
+from basic_ollama_agent_with_post import OllamaChat, GroqChat
 from typing import List, Dict, Optional
 import threading
 import time
@@ -47,6 +47,80 @@ app.mount("/static", StaticFiles(directory="."), name="static")
 # Global variables for model management
 default_model = None
 chat_agent = None
+groq_chat_agent = None
+
+# Define available Groq models
+GROQ_MODELS = [
+    {
+        'name': 'openai/gpt-oss-120b',
+        'displayName': 'GPT-OSS 120B',
+        'provider': 'groq',
+        'size': '120B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'openai/gpt-oss-20b',
+        'displayName': 'GPT-OSS 20B',
+        'provider': 'groq',
+        'size': '20B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'qwen/qwen3-32b',
+        'displayName': 'Qwen3 32B',
+        'provider': 'groq',
+        'size': '32B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'meta-llama/llama-4-scout-17b-16e-instruct',
+        'displayName': 'Llama-4 Scout 17B',
+        'provider': 'groq',
+        'size': '17B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'meta-llama/llama-4-maverick-17b-128e-instruct',
+        'displayName': 'Llama-4 Maverick 17B',
+        'provider': 'groq',
+        'size': '17B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'llama-3.3-70b-versatile',
+        'displayName': 'Llama 3.3 70B Versatile',
+        'provider': 'groq',
+        'size': '70B',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'deepseek-r1-distill-llama-70b',
+        'displayName': 'DeepSeek R1 Distill Llama 70B',
+        'provider': 'groq',
+        'size': '70B',
+        'modified_at': 'Available'
+    }
+]
+
+def is_groq_model(model_name: str) -> bool:
+    """Check if a model name corresponds to a Groq model."""
+    groq_model_names = [model['name'] for model in GROQ_MODELS]
+    return model_name in groq_model_names
+
+def get_chat_agent(model_name: str):
+    """Get the appropriate chat agent (OllamaChat or GroqChat) for the given model."""
+    global chat_agent, groq_chat_agent
+    
+    if is_groq_model(model_name):
+        if groq_chat_agent is None or groq_chat_agent.model != model_name:
+            # Create new GroqChat agent or switch model
+            groq_chat_agent = GroqChat(model=model_name)
+        return groq_chat_agent
+    else:
+        if chat_agent is None or chat_agent.model != model_name:
+            # Create new OllamaChat agent or switch model
+            chat_agent = OllamaChat(model=model_name)
+        return chat_agent
 
 # Track active streaming sessions
 active_streams = {}
@@ -204,14 +278,23 @@ def get_first_available_model():
     return "qwen2.5:7b"
 
 def initialize_chat_agent():
-    """Initialize the chat agent with the first available model."""
-    global default_model, chat_agent
+    """Initialize the chat agents with the first available model."""
+    global default_model, chat_agent, groq_chat_agent
     default_model = get_first_available_model()
     chat_agent = OllamaChat(model=default_model)
-    print(f"Initialized chat agent with model: {default_model}")
+    print(f"Initialized Ollama chat agent with model: {default_model}")
+    
+    # Initialize Groq agent with default model (can be changed later)
+    try:
+        groq_chat_agent = GroqChat(model="llama-3.3-70b-versatile")
+        print("Initialized Groq chat agent with default model: llama-3.3-70b-versatile")
+    except Exception as e:
+        print(f"Could not initialize Groq chat agent: {e}")
+        groq_chat_agent = None
+    
     return default_model
 
-# Initialize the chat agent with the first available model
+# Initialize the chat agents with the first available model
 default_model = initialize_chat_agent()
 
 class ChatMessage(BaseModel):
@@ -243,43 +326,45 @@ async def index():
 
 @app.get("/models")
 async def get_available_models():
-    """Get list of available Ollama models with consistent default."""
+    """Get list of available models categorized by provider (Ollama and Groq)."""
+    ollama_models = []
+    
     try:
         # Try to get models from Ollama API
         import requests
         response = requests.get("http://localhost:11434/api/tags", timeout=10)
         if response.status_code == 200:
             data = response.json()
-            models = []
             for model in data.get('models', []):
-                models.append({
+                ollama_models.append({
                     'name': model.get('name', 'Unknown'),
+                    'provider': 'ollama',
                     'size': model.get('size', 'Unknown'),
                     'modified_at': model.get('modified_at', 'Unknown')
                 })
-            
-            # Include the default model info
-            result = {
-                "models": models,
-                "default_model": default_model if models else None,
-                "status": "success"
-            }
-            return result
     except Exception as e:
         print(f"Error fetching models from Ollama: {e}")
+        # Fallback to common Ollama models if API fails
+        ollama_models = [
+            {"name": default_model, "provider": "ollama", "size": "Unknown", "modified_at": "Recently"},
+            {"name": "qwen2.5:7b", "provider": "ollama", "size": "4.7GB", "modified_at": "Recently"},
+            {"name": "gemma3:4b-it-fp16", "provider": "ollama", "size": "2.4GB", "modified_at": "Recently"},
+            {"name": "llama3.2:3b", "provider": "ollama", "size": "2.0GB", "modified_at": "Recently"},
+            {"name": "phi3:mini", "provider": "ollama", "size": "2.3GB", "modified_at": "Recently"},
+        ]
     
-    # Fallback to common models if API fails, with consistent default
-    fallback_models = [
-        {"name": default_model, "size": "Unknown", "modified_at": "Recently"},
-        {"name": "qwen2.5:7b", "size": "4.7GB", "modified_at": "Recently"},
-        {"name": "gemma3:4b-it-fp16", "size": "2.4GB", "modified_at": "Recently"},
-        {"name": "llama3.2:3b", "size": "2.0GB", "modified_at": "Recently"},
-        {"name": "phi3:mini", "size": "2.3GB", "modified_at": "Recently"},
-    ]
+    # Get Groq models (always available if API key is configured)
+    groq_models = GROQ_MODELS.copy()
+    
+    # Combine all models for backward compatibility
+    all_models = ollama_models + groq_models
+    
     return {
-        "models": fallback_models,
+        "models": all_models,
+        "ollama_models": ollama_models,
+        "groq_models": groq_models,
         "default_model": default_model,
-        "status": "fallback"
+        "status": "success"
     }
 
 async def stop_all_other_models(current_model: str) -> List[str]:
@@ -341,43 +426,73 @@ async def ensure_model_loaded_with_keepalive(model_name: str) -> bool:
 
 @app.post("/change-model")
 async def change_model(request: ModelChangeRequest):
-    """Change the active model, stop others, and set keepalive to 30 minutes."""
+    """Change the active model, supporting both Ollama and Groq models."""
     try:
-        global chat_agent
+        global chat_agent, groq_chat_agent
         
         print(f"\n\n Model Requested: {request.model}")
+        print(f"Model Type: {'Groq' if is_groq_model(request.model) else 'Ollama'}")
         
-        # Step 1: Stop all other models
-        stopped_models = await stop_all_other_models(request.model)
+        stopped_models = []
         
-        # Step 2: Ensure the new model is loaded with keepalive
-        model_loaded = await ensure_model_loaded_with_keepalive(request.model)
-        
-        if not model_loaded:
+        if is_groq_model(request.model):
+            # Handle Groq model change
+            print(f"Switching to Groq model: {request.model}")
+            
+            # Create new GroqChat agent with the selected model
+            groq_chat_agent = GroqChat(model=request.model)
+            
+            # Restore conversation history if provided
+            if request.conversation_history:
+                groq_chat_agent.conversation_history = request.conversation_history
+            
+            print(f"Groq model changed to {groq_chat_agent.model} with history restored: {len(request.conversation_history)} messages")
+            
             return {
-                "status": "error", 
-                "message": f"Failed to load model {request.model}",
-                "stopped_models": stopped_models
+                "status": "success",
+                "message": f"Model changed to {request.model} (Groq)",
+                "history_restored": len(request.conversation_history) > 0,
+                "stopped_models": [],
+                "provider": "groq"
             }
-        
-        # Step 3: Create new chat agent with the selected model
-        chat_agent = OllamaChat(model=request.model)
-        
-        # Step 4: Restore conversation history if provided
-        if request.conversation_history:
-            chat_agent.conversation_history = request.conversation_history
-        
-        print(f"Model changed to {chat_agent.model} with history restored: {len(request.conversation_history)} messages")
-        print(f"Stopped models: {stopped_models}")
-        
-        return {
-            "status": "success", 
-            "message": f"Model changed to {request.model}",
-            "history_restored": len(request.conversation_history) > 0,
-            "stopped_models": stopped_models,
-            "keepalive_set": "30m"
-        }
+        else:
+            # Handle Ollama model change
+            print(f"Switching to Ollama model: {request.model}")
+            
+            # Step 1: Stop all other Ollama models
+            stopped_models = await stop_all_other_models(request.model)
+            
+            # Step 2: Ensure the new Ollama model is loaded with keepalive
+            model_loaded = await ensure_model_loaded_with_keepalive(request.model)
+            
+            if not model_loaded:
+                return {
+                    "status": "error", 
+                    "message": f"Failed to load Ollama model {request.model}",
+                    "stopped_models": stopped_models
+                }
+            
+            # Step 3: Create new OllamaChat agent with the selected model
+            chat_agent = OllamaChat(model=request.model)
+            
+            # Step 4: Restore conversation history if provided
+            if request.conversation_history:
+                chat_agent.conversation_history = request.conversation_history
+            
+            print(f"Ollama model changed to {chat_agent.model} with history restored: {len(request.conversation_history)} messages")
+            print(f"Stopped models: {stopped_models}")
+            
+            return {
+                "status": "success", 
+                "message": f"Model changed to {request.model} (Ollama)",
+                "history_restored": len(request.conversation_history) > 0,
+                "stopped_models": stopped_models,
+                "keepalive_set": "30m",
+                "provider": "ollama"
+            }
+            
     except Exception as e:
+        print(f"Error changing model: {e}")
         return {"status": "error", "message": str(e)}
 
 @app.get("/model-status")
@@ -440,13 +555,35 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None):
                 active_streams[session] = True
                 stream_locks[session] = threading.Lock()
             
-            # Use specified model if provided
-            current_agent = chat_agent
-            if model and model != chat_agent.model:
-                # Create temporary agent with specified model but preserve history
-                temp_agent = OllamaChat(model=model)
-                temp_agent.conversation_history = chat_agent.conversation_history.copy()
-                current_agent = temp_agent
+            # Get the appropriate chat agent based on model type
+            if model:
+                current_agent = get_chat_agent(model)
+                # Preserve conversation history from the main agents
+                if is_groq_model(model):
+                    if groq_chat_agent and groq_chat_agent.model == model:
+                        current_agent = groq_chat_agent
+                    else:
+                        # Create new GroqChat agent and preserve history
+                        current_agent = GroqChat(model=model)
+                        # Copy history from either groq or ollama agent
+                        if groq_chat_agent:
+                            current_agent.conversation_history = groq_chat_agent.conversation_history.copy()
+                        elif chat_agent:
+                            current_agent.conversation_history = chat_agent.conversation_history.copy()
+                else:
+                    if chat_agent and chat_agent.model == model:
+                        current_agent = chat_agent
+                    else:
+                        # Create new OllamaChat agent and preserve history
+                        current_agent = OllamaChat(model=model)
+                        # Copy history from either ollama or groq agent
+                        if chat_agent:
+                            current_agent.conversation_history = chat_agent.conversation_history.copy()
+                        elif groq_chat_agent:
+                            current_agent.conversation_history = groq_chat_agent.conversation_history.copy()
+            else:
+                # Use default agent (Ollama)
+                current_agent = chat_agent if chat_agent else OllamaChat(model=default_model)
             
             yield f"data: {json.dumps({'type': 'start', 'message': 'Starting response...'})}\n\n"
             
@@ -457,17 +594,18 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None):
                     # Check if stream should be stopped
                     if session and not active_streams.get(session, False):
                         print(f"Stream {session} was stopped by user")
-                        # Send stop signal to OLLAMA (sync version inside generator)
-                        import asyncio
-                        try:
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
-                                # Schedule the stop function to run
-                                loop.create_task(force_stop_ollama_generation(current_agent.model))
-                            else:
-                                asyncio.run(force_stop_ollama_generation(current_agent.model))
-                        except Exception as e:
-                            print(f"Error scheduling stop: {e}")
+                        # Send stop signal to OLLAMA only (Groq handles stopping automatically)
+                        if not is_groq_model(current_agent.model):
+                            import asyncio
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # Schedule the stop function to run
+                                    loop.create_task(force_stop_ollama_generation(current_agent.model))
+                                else:
+                                    asyncio.run(force_stop_ollama_generation(current_agent.model))
+                            except Exception as e:
+                                print(f"Error scheduling stop: {e}")
                         yield f"data: {json.dumps({'type': 'stopped', 'message': 'Stream stopped by user'})}\n\n"
                         break
                     

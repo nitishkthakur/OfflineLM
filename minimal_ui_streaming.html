@@ -114,9 +114,18 @@
                         x-model="selectedModel" 
                         @change="changeModel"
                         :disabled="isLoadingModels">
-                        <template x-for="model in availableModels" :key="model.name">
-                            <option :value="model.name" x-text="model.name"></option>
-                        </template>
+                        <!-- Ollama Models -->
+                        <optgroup label="Ollama Models">
+                            <template x-for="model in ollamaModels" :key="model.name">
+                                <option :value="model.name" x-text="model.name"></option>
+                            </template>
+                        </optgroup>
+                        <!-- Groq Models -->
+                        <optgroup label="Groq Models">
+                            <template x-for="model in groqModels" :key="model.name">
+                                <option :value="model.name" x-text="model.displayName || model.name"></option>
+                            </template>
+                        </optgroup>
                     </select>
                     <div class="model-info">
                         <span x-show="isLoadingModels">Loading models...</span>

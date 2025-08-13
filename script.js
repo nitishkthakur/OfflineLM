@@ -589,6 +589,8 @@ function streamingChatApp() {
 function configPanel() {
     return {
         availableModels: [],
+        ollamaModels: [],
+        groqModels: [],
         selectedModel: null, // Will be set dynamically
         selectedModelInfo: null,
         isLoadingModels: false,
@@ -616,8 +618,65 @@ function configPanel() {
                 const data = await response.json();
                 this.availableModels = data.models || [];
                 
+                // Separate Ollama and Groq models
+                this.ollamaModels = data.ollama_models || [];
+                this.groqModels = data.groq_models || [
+                    { 
+                        name: 'openai/gpt-oss-120b', 
+                        displayName: 'GPT-OSS 120B',
+                        provider: 'groq',
+                        size: '120B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'openai/gpt-oss-20b', 
+                        displayName: 'GPT-OSS 20B',
+                        provider: 'groq',
+                        size: '20B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'qwen/qwen3-32b', 
+                        displayName: 'Qwen3 32B',
+                        provider: 'groq',
+                        size: '32B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'meta-llama/llama-4-scout-17b-16e-instruct', 
+                        displayName: 'Llama-4 Scout 17B',
+                        provider: 'groq',
+                        size: '17B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'meta-llama/llama-4-maverick-17b-128e-instruct', 
+                        displayName: 'Llama-4 Maverick 17B',
+                        provider: 'groq',
+                        size: '17B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'llama-3.3-70b-versatile', 
+                        displayName: 'Llama 3.3 70B Versatile',
+                        provider: 'groq',
+                        size: '70B', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'deepseek-r1-distill-llama-70b', 
+                        displayName: 'DeepSeek R1 Distill Llama 70B',
+                        provider: 'groq',
+                        size: '70B', 
+                        modified_at: 'Available' 
+                    }
+                ];
+                
+                // Combine all models for backward compatibility
+                this.availableModels = [...this.ollamaModels, ...this.groqModels];
+                
                 // Use the server-provided default model or first available model
-                const defaultModel = data.default_model || (this.availableModels.length > 0 ? this.availableModels[0].name : 'qwen2.5:7b');
+                const defaultModel = data.default_model || (this.ollamaModels.length > 0 ? this.ollamaModels[0].name : 'qwen2.5:7b');
                 
                 // Set the default model if not already set
                 if (!this.selectedModel) {
@@ -629,6 +688,7 @@ function configPanel() {
                 this.selectedModelInfo = this.availableModels.find(model => model.name === this.selectedModel);
                 
                 console.log(`Default model set to: ${this.selectedModel}`);
+                console.log(`Loaded ${this.ollamaModels.length} Ollama models and ${this.groqModels.length} Groq models`);
                 
             } catch (error) {
                 console.error('Error loading models:', error);
@@ -639,14 +699,68 @@ function configPanel() {
                     const defaultData = await defaultResponse.json();
                     const fallbackDefault = defaultData.default_model || 'qwen2.5:7b';
                     
-                    // Fallback models if API fails
-                    this.availableModels = [
+                    // Fallback Ollama models if API fails
+                    this.ollamaModels = [
                         { name: fallbackDefault, size: 'Unknown', modified_at: 'Recently' },
                         { name: 'qwen2.5:7b', size: '4.7GB', modified_at: 'Recently' },
                         { name: 'gemma3:4b-it-fp16', size: '2.4GB', modified_at: 'Recently' },
                         { name: 'llama3.2:3b', size: '2.0GB', modified_at: 'Recently' }
                     ];
                     
+                    // Always include Groq models
+                    this.groqModels = [
+                        { 
+                            name: 'openai/gpt-oss-120b', 
+                            displayName: 'GPT-OSS 120B',
+                            provider: 'groq',
+                            size: '120B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'openai/gpt-oss-20b', 
+                            displayName: 'GPT-OSS 20B',
+                            provider: 'groq',
+                            size: '20B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'qwen/qwen3-32b', 
+                            displayName: 'Qwen3 32B',
+                            provider: 'groq',
+                            size: '32B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'meta-llama/llama-4-scout-17b-16e-instruct', 
+                            displayName: 'Llama-4 Scout 17B',
+                            provider: 'groq',
+                            size: '17B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'meta-llama/llama-4-maverick-17b-128e-instruct', 
+                            displayName: 'Llama-4 Maverick 17B',
+                            provider: 'groq',
+                            size: '17B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'llama-3.3-70b-versatile', 
+                            displayName: 'Llama 3.3 70B Versatile',
+                            provider: 'groq',
+                            size: '70B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'deepseek-r1-distill-llama-70b', 
+                            displayName: 'DeepSeek R1 Distill Llama 70B',
+                            provider: 'groq',
+                            size: '70B', 
+                            modified_at: 'Available' 
+                        }
+                    ];
+                    
+                    this.availableModels = [...this.ollamaModels, ...this.groqModels];
                     this.selectedModel = fallbackDefault;
                     this.chatStats.currentModel = fallbackDefault;
                     
@@ -654,9 +768,26 @@ function configPanel() {
                     console.error('Error getting default model:', defaultError);
                     // Final fallback
                     const ultimateFallback = 'qwen2.5:7b';
-                    this.availableModels = [
+                    this.ollamaModels = [
                         { name: ultimateFallback, size: 'Unknown', modified_at: 'Recently' }
                     ];
+                    this.groqModels = [
+                        { 
+                            name: 'llama-3.3-70b-versatile', 
+                            displayName: 'Llama 3.3 70B Versatile',
+                            provider: 'groq',
+                            size: '70B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'deepseek-r1-distill-llama-70b', 
+                            displayName: 'DeepSeek R1 Distill Llama 70B',
+                            provider: 'groq',
+                            size: '70B', 
+                            modified_at: 'Available' 
+                        }
+                    ];
+                    this.availableModels = [...this.ollamaModels, ...this.groqModels];
                     this.selectedModel = ultimateFallback;
                     this.chatStats.currentModel = ultimateFallback;
                 }

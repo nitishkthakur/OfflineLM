@@ -224,6 +224,59 @@ body {
     color: var(--colorNeutralForeground1);
 }
 
+.model-selector optgroup {
+    font-weight: var(--fontWeightSemibold);
+    font-size: var(--fontSizeBase300);
+    color: var(--colorBrandForeground1);
+    background: linear-gradient(135deg, var(--colorBrandBackground), var(--colorBrandBackgroundHover));
+    padding: var(--spacingVerticalM) var(--spacingHorizontalS);
+    margin: var(--spacingVerticalS) 0;
+    border: 1px solid var(--colorBrandBackground);
+    border-radius: var(--borderRadiusSmall);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    box-shadow: var(--shadow2);
+    position: relative;
+    overflow: visible;
+}
+
+/* Add visual indicators for different providers */
+.model-selector optgroup[label*="Ollama"]:before {
+    content: "🦙 ";
+    font-size: var(--fontSizeBase400);
+    margin-right: var(--spacingHorizontalXS);
+}
+
+.model-selector optgroup[label*="Groq"]:before {
+    content: "⚡ ";
+    font-size: var(--fontSizeBase400);
+    margin-right: var(--spacingHorizontalXS);
+}
+
+.model-selector optgroup option {
+    font-weight: var(--fontWeightRegular);
+    font-size: var(--fontSizeBase300);
+    padding: var(--spacingVerticalS) var(--spacingHorizontalL);
+    margin: var(--spacingVerticalXXS) 0;
+    background-color: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground1);
+    border-left: 3px solid transparent;
+    text-transform: none;
+    letter-spacing: normal;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.model-selector optgroup option:hover {
+    background-color: var(--colorNeutralBackground4);
+    border-left-color: var(--colorBrandBackground);
+}
+
+.model-selector optgroup option:selected {
+    background-color: var(--colorBrandBackground);
+    color: var(--colorBrandForeground1);
+    border-left-color: var(--colorBrandBackgroundHover);
+}
+
 .model-info {
     margin-top: var(--spacingVerticalS);
     font-size: var(--fontSizeBase200);
