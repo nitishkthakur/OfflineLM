@@ -1303,3 +1303,169 @@ input:checked + .slider:before {
         gap: var(--spacingVerticalM);
     }
 }
+
+/* RAG Card Styles - Mirror search card styles */
+.rag-card {
+    background-color: var(--colorNeutralBackground3);
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    box-shadow: var(--shadow2);
+    overflow: hidden;
+    margin-top: var(--spacingVerticalM);
+}
+
+.rag-header {
+    background-color: var(--colorNeutralBackground2);
+    padding: var(--spacingVerticalM) var(--spacingHorizontalL);
+    border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.rag-header h4 {
+    font-size: var(--fontSizeBase300);
+    font-weight: var(--fontWeightMedium);
+    color: var(--colorNeutralForeground1);
+    margin: 0;
+    line-height: var(--lineHeightBase300);
+}
+
+.rag-content {
+    padding: var(--spacingVerticalL) var(--spacingHorizontalL);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalL);
+}
+
+.rag-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: var(--spacingHorizontalM);
+}
+
+.rag-options-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalS);
+}
+
+.rag-options-container label {
+    font-size: var(--fontSizeBase200);
+    color: var(--colorNeutralForeground2);
+    font-weight: var(--fontWeightMedium);
+    line-height: var(--lineHeightBase200);
+}
+
+.rag-chunks-input {
+    background-color: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    padding: var(--spacingVerticalS) var(--spacingHorizontalM);
+    color: var(--colorNeutralForeground1);
+    font-size: var(--fontSizeBase300);
+    font-family: var(--fontFamilyBase);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    line-height: var(--lineHeightBase300);
+    width: 100%;
+}
+
+.rag-chunks-input:focus {
+    border-color: var(--colorBrandBackground);
+    box-shadow: 0 0 0 2px rgba(0, 132, 255, 0.2);
+}
+
+.rag-text-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacingVerticalS);
+}
+
+.rag-text-input-container label {
+    font-size: var(--fontSizeBase200);
+    color: var(--colorNeutralForeground2);
+    font-weight: var(--fontWeightMedium);
+    line-height: var(--lineHeightBase200);
+}
+
+.rag-text-input {
+    background-color: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke2);
+    border-radius: var(--borderRadiusMedium);
+    padding: var(--spacingVerticalM) var(--spacingHorizontalM);
+    color: var(--colorNeutralForeground1);
+    font-size: var(--fontSizeBase300);
+    font-family: var(--fontFamilyBase);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    line-height: var(--lineHeightBase300);
+    width: 100%;
+    min-height: 100px;
+    resize: vertical;
+}
+
+.rag-text-input:focus {
+    border-color: var(--colorBrandBackground);
+    box-shadow: 0 0 0 2px rgba(0, 132, 255, 0.2);
+}
+
+.rag-text-input::placeholder {
+    color: var(--colorNeutralForeground3);
+}
+
+.rag-process-btn {
+    background-color: var(--colorBrandBackground);
+    border: 1px solid var(--colorBrandBackground);
+    border-radius: var(--borderRadiusMedium);
+    padding: var(--spacingVerticalS) var(--spacingHorizontalL);
+    color: var(--colorNeutralForegroundOnBrand);
+    font-size: var(--fontSizeBase300);
+    font-family: var(--fontFamilyBase);
+    font-weight: var(--fontWeightMedium);
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s;
+    line-height: var(--lineHeightBase300);
+    align-self: flex-start;
+}
+
+.rag-process-btn:hover {
+    background-color: var(--colorBrandBackgroundHover);
+    border-color: var(--colorBrandBackgroundHover);
+}
+
+.rag-process-btn:active {
+    background-color: var(--colorBrandBackgroundPressed);
+    border-color: var(--colorBrandBackgroundPressed);
+}
+
+.rag-process-btn:disabled {
+    background-color: var(--colorNeutralBackgroundDisabled);
+    border-color: var(--colorNeutralStrokeDisabled);
+    color: var(--colorNeutralForegroundDisabled);
+    cursor: not-allowed;
+}
+
+/* RAG status indicator */
+.rag-status {
+    font-size: var(--fontSizeBase200);
+    color: var(--colorNeutralForeground2);
+    margin-top: var(--spacingVerticalS);
+    padding: var(--spacingVerticalS) var(--spacingHorizontalM);
+    background-color: var(--colorNeutralBackground2);
+    border-radius: var(--borderRadiusSmall);
+    border-left: 3px solid var(--colorBrandBackground);
+}
+
+.rag-status.processing {
+    border-left-color: var(--colorPaletteYellowBackground3);
+    color: var(--colorPaletteYellowForeground2);
+}
+
+.rag-status.ready {
+    border-left-color: var(--colorPaletteGreenBackground3);
+    color: var(--colorPaletteGreenForeground2);
+}
+
+.rag-status.error {
+    border-left-color: var(--colorPaletteRedBackground3);
+    color: var(--colorPaletteRedForeground2);
+}

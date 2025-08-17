@@ -50,6 +50,30 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <div class="rag-card">
+                        <div class="rag-header">
+                            <h4>RAG</h4>
+                        </div>
+                        <div class="rag-content">
+                            <div class="rag-toggle-container">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rag-toggle">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Enable RAG</span>
+                            </div>
+                            <div class="rag-options-container">
+                                <label for="rag-chunks">Top Chunks:</label>
+                                <input type="number" id="rag-chunks" class="rag-chunks-input" value="5" min="1" max="10">
+                            </div>
+                            <div class="rag-text-input-container">
+                                <label for="rag-text">Context Text:</label>
+                                <textarea id="rag-text" class="rag-text-input" placeholder="Paste your text here for RAG retrieval..." rows="4"></textarea>
+                                <button class="rag-process-btn" id="rag-process-btn">Process Text</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <!-- Removed history-lower section that contained the History header -->

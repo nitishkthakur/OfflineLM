@@ -203,6 +203,12 @@ function streamingChatApp() {
                 const searchEnabled = searchToggle ? searchToggle.checked : false;
                 const searchCount = searchCountInput ? parseInt(searchCountInput.value) || 5 : 5;
                 
+                // Get RAG settings from the UI
+                const ragToggle = document.getElementById('rag-toggle');
+                const ragChunksInput = document.getElementById('rag-chunks');
+                const ragEnabled = ragToggle ? ragToggle.checked : false;
+                const ragChunks = ragChunksInput ? parseInt(ragChunksInput.value) || 5 : 5;
+                
                 // Debug logging (uncomment for debugging)
                 // console.log('DEBUG: Search toggle element:', searchToggle);
                 // console.log('DEBUG: Search count input element:', searchCountInput);
@@ -210,8 +216,9 @@ function streamingChatApp() {
                 // console.log('DEBUG: Search count value:', searchCountInput ? searchCountInput.value : 'null');
                 console.log('Using model for streaming:', currentModel);
                 console.log('Search enabled:', searchEnabled, 'Search count:', searchCount);
+                console.log('RAG enabled:', ragEnabled, 'RAG chunks:', ragChunks);
                 
-                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}&session=${sessionId}&search_enabled=${searchEnabled}&search_count=${searchCount}`);
+                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}&session=${sessionId}&search_enabled=${searchEnabled}&search_count=${searchCount}&rag_enabled=${ragEnabled}&rag_chunks=${ragChunks}`);
                 this.currentEventSource = eventSource;
                 
                 // Add connection state tracking
@@ -1001,6 +1008,81 @@ function configPanel() {
         }
     }
 }
+
+// RAG functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const ragProcessBtn = document.getElementById('rag-process-btn');
+    const ragTextInput = document.getElementById('rag-text');
+    const ragCard = document.querySelector('.rag-card');
+    
+    if (ragProcessBtn && ragTextInput) {
+        ragProcessBtn.addEventListener('click', async function() {
+            const text = ragTextInput.value.trim();
+            if (!text) {
+                showRagStatus('Please enter text to process', 'error');
+                return;
+            }
+            
+            ragProcessBtn.disabled = true;
+            ragProcessBtn.textContent = 'Processing...';
+            showRagStatus('Processing text and generating embeddings...', 'processing');
+            
+            try {
+                const response = await fetch('/rag/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showRagStatus(`Text processed successfully! Created ${result.chunk_count || 0} chunks.`, 'ready');
+                } else {
+                    const error = await response.json();
+                    showRagStatus(`Error: ${error.error || 'Failed to process text'}`, 'error');
+                }
+            } catch (error) {
+                console.error('RAG processing error:', error);
+                showRagStatus('Error: Failed to process text. Check console for details.', 'error');
+            } finally {
+                ragProcessBtn.disabled = false;
+                ragProcessBtn.textContent = 'Process Text';
+            }
+        });
+    }
+    
+    function showRagStatus(message, type = '') {
+        const ragCard = document.querySelector('.rag-card');
+        if (!ragCard) return;
+        
+        // Remove existing status
+        const existingStatus = ragCard.querySelector('.rag-status');
+        if (existingStatus) {
+            existingStatus.remove();
+        }
+        
+        // Add new status
+        const statusDiv = document.createElement('div');
+        statusDiv.className = `rag-status ${type}`;
+        statusDiv.textContent = message;
+        
+        const ragContent = ragCard.querySelector('.rag-content');
+        if (ragContent) {
+            ragContent.appendChild(statusDiv);
+        }
+        
+        // Auto-remove status after 5 seconds for non-persistent messages
+        if (type === 'processing' || type === 'error') {
+            setTimeout(() => {
+                if (statusDiv.parentNode) {
+                    statusDiv.remove();
+                }
+            }, 5000);
+        }
+    }
+});
 
 // Mobile config toggle
 function toggleConfig() {

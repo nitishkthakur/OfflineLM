@@ -21,7 +21,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+def tavily_to_context(search_results):
+    context = []
+    for result in search_results['results']:
+        context.append(result['raw_content'])
 
+    return "\n\n\n".join(context)
 class TavilySearcher:
     """
     A wrapper class for Tavily search functionality with configurable defaults.

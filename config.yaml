@@ -29,6 +29,13 @@ search:
   chunks_per_source: 2
   include_raw_content: true
 
+# Text Retriever configuration
+text_retriever:
+  embedding_model: "nomic-embed-text"  # Ollama embedding model
+  chunk_size: 5000  # Characters per chunk
+  chunk_overlap: 1000  # Character overlap between chunks
+  top_k: 5  # Number of top chunks to retrieve
+
 # System instructions for different modes
 system_instructions:
   # System message for regular chat mode (non-search)
