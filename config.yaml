@@ -1,0 +1,46 @@
+# Configuration file for OfflineLM
+
+# Thinking words configuration
+# Each entry is a list with [start_marker, end_marker]
+# These patterns will be detected and displayed in a special greyed-out thinking area
+thinking_words:
+  - ["<think>", "</think>"]
+  - ["<analysis>", "</analysis>"]
+  - ["<reasoning>", "</reasoning>"]
+  - ["<planning>", "</planning>"]
+  - ["<reflection>", "</reflection>"]
+  - ["Thinking...", "...done thinking"]
+  - ["Let me think...", "...thinking complete"]
+  - ["*thinking*", "*end thinking*"]
+
+# Server configuration
+server:
+  port: 8001
+  host: "localhost"
+
+# Model configuration
+models:
+  default_ollama: "auto"  # Auto-detect first available
+  default_groq: "llama-3.3-70b-versatile"
+  
+# Search configuration  
+search:
+  max_results: 5
+  chunks_per_source: 2
+  include_raw_content: true
+
+# System instructions for different modes
+system_instructions:
+  # System message for regular chat mode (non-search)
+  chat_mode: |
+    You are a helpful AI assistant. Provide clear, accurate, and concise responses to user queries.
+    If you need to reason through complex problems, use <think> tags to show your thinking process.
+    Always aim to be helpful while being honest about the limitations of your knowledge.
+  
+  # System message for search-enabled mode
+  search_mode: |
+    You are a helpful AI assistant with access to web search capabilities.
+    When answering questions, you can search for current information to provide accurate and up-to-date responses.
+    Use <think> tags to show your reasoning process when analyzing search results.
+    Always cite your sources when using information from search results.
+    If you cannot find relevant information through search, clearly state this limitation.

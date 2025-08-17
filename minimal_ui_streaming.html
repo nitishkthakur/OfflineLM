@@ -63,13 +63,51 @@
             <div class="chat-messages" id="chat-messages" x-ref="chatMessages">
                 <template x-for="message in messages" :key="message.id">
                     <div class="message" :class="[message.type, message.streaming ? 'streaming' : '']">
+                        <!-- Search results toggle button (only for assistant messages with search data) -->
+                        <div x-show="message.type === 'assistant' && hasSearchData(message)" class="search-toggle-section">
+                            <button 
+                                class="search-results-toggle"
+                                @click="toggleSearchResults(message.id)"
+                                :title="message.showSearchResults ? 'Hide search snippets' : 'Show search snippets'">
+                                <span x-text="message.showSearchResults ? '▼ Hide' : '▶ Show'"></span>
+                                search snippets
+                                <span x-text="'(' + (message.searchData?.results?.length || 0) + ' results)'"></span>
+                            </button>
+                        </div>
+                        
+                        <!-- Main message content -->
                         <span x-html="message.content"></span>
+                        
+                        <!-- Search results display (only shown when toggled) -->
+                        <div x-show="message.type === 'assistant' && message.showSearchResults && hasSearchData(message)" class="search-results-container">
+                            <div class="search-results-header">
+                                <h4>Search Results - Exact LLM Input</h4>
+                                <p class="search-query">Query: <em x-text="message.searchData?.query"></em></p>
+                                <p class="search-explanation">Below is exactly what the AI model saw for each search result:</p>
+                            </div>
+                            <div class="search-results-list">
+                                <template x-for="(result, index) in message.searchData?.results || []" :key="index">
+                                    <div class="search-result-item">
+                                        <div class="search-result-url-section">
+                                            <strong>Source URL:</strong>
+                                            <a class="search-result-url" :href="result.url" target="_blank" rel="noopener noreferrer" x-text="result.url"></a>
+                                        </div>
+                                        <div class="llm-input-section">
+                                            <strong>Exact text fed to LLM:</strong>
+                                            <div class="llm-input-content">
+                                                <pre x-text="result.llm_input_chunk"></pre>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
                     </div>
                 </template>
                 
                 <!-- Loading message -->
                 <div x-show="isLoading" class="message loading">
-                    <span class="loading-dots">Thinking</span>
+                    <span class="loading-dots" x-text="loadingMessage || 'Thinking'"></span>
                 </div>
             </div>
             

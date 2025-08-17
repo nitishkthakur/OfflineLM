@@ -256,6 +256,8 @@ class OllamaChat:
         model: str = "gemma3:4b-it-fp16",
         endpoint: str = "http://localhost:11434/api/chat",
         proxies: Optional[Dict[str, str]] = None,
+        enable_thinking: bool = True,
+        system_message: Optional[str] = None,
     ):
         """
         Initialize the Ollama Chat.
@@ -264,11 +266,90 @@ class OllamaChat:
             model: Name of the Ollama model to use
             endpoint: URL of the Ollama chat API
             proxies: Proxy dictionary passed to requests.post
+            enable_thinking: Enable Ollama's new thinking feature (think=True)
+            system_message: System message to set context for the conversation
         """
         self.model = model
         self.endpoint = endpoint
         self.proxies = proxies if proxies is not None else {"http": "", "https": ""}
+        self.enable_thinking = enable_thinking
+        self.system_message = system_message
+        self._thinking_supported = None  # Cache thinking support status
         self.conversation_history = []
+        
+        # Add system message to conversation history if provided
+        if self.system_message:
+            self.conversation_history.append({'role': 'system', 'content': self.system_message})
+
+    def _check_thinking_support(self, request_params: dict) -> bool:
+        """
+        Check if the current model supports thinking by testing with a simple request.
+        Cache the result to avoid repeated checks.
+        
+        Args:
+            request_params: Base request parameters to test
+            
+        Returns:
+            True if thinking is supported, False otherwise
+        """
+        if self._thinking_supported is not None:
+            return self._thinking_supported
+            
+        if not self.enable_thinking:
+            self._thinking_supported = False
+            return False
+            
+        try:
+            # Test with a simple request
+            test_params = request_params.copy()
+            test_params.update({
+                'messages': [{'role': 'user', 'content': 'test'}],
+                'think': True,
+                'stream': False
+            })
+            
+            response = requests.post(
+                self.endpoint,
+                json=test_params,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                # If we get a response with thinking field or no error, thinking is supported
+                self._thinking_supported = True
+                print(f"✅ Model {self.model} supports thinking")
+            else:
+                self._thinking_supported = False
+                print(f"⚠️  Model {self.model} does not support thinking (status {response.status_code})")
+                
+        except Exception as e:
+            self._thinking_supported = False
+            print(f"⚠️  Model {self.model} does not support thinking: {str(e)}")
+            
+        return self._thinking_supported
+
+    def _format_thinking_content(self, thinking: str, content: str) -> str:
+        """
+        Format thinking content with the same aesthetics as existing thinking tags.
+        
+        Args:
+            thinking: The thinking/reasoning content from message.thinking
+            content: The final response content from message.content
+            
+        Returns:
+            Formatted string with thinking section and response
+        """
+        if not thinking:
+            return content
+            
+        # Format thinking section to match existing aesthetics
+        formatted_thinking = f'<div class="think-section"><em>💭 Reasoning:\n{thinking.strip()}</em></div>'
+        
+        if content.strip():
+            return formatted_thinking + '\n\n' + content.strip()
+        else:
+            return formatted_thinking
 
     def chat(self, prompt: str, conversation_history: List[Dict[str, str]] = None) -> str:
         """
@@ -283,6 +364,9 @@ class OllamaChat:
         try:
             if conversation_history is not None:
                 self.conversation_history = conversation_history
+                # Ensure system message is at the beginning if we have one
+                if self.system_message and (not self.conversation_history or self.conversation_history[0].get('role') != 'system'):
+                    self.conversation_history.insert(0, {'role': 'system', 'content': self.system_message})
 
             # Add user message to history
             self.conversation_history.append({'role': 'user', 'content': prompt})
@@ -295,6 +379,11 @@ class OllamaChat:
                 'keep_alive': '30m'
             }
             
+            # Check if thinking is supported and add parameter accordingly
+            use_thinking = self._check_thinking_support(request_params)
+            if use_thinking:
+                request_params['think'] = True
+            
             # Make the request to Ollama
             response = requests.post(
                 self.endpoint,
@@ -303,13 +392,22 @@ class OllamaChat:
             response.raise_for_status()
             response_data = response.json()
             
-            # Extract the assistant's response
-            assistant_message = response_data['message']['content']
+            # Extract thinking and content from response
+            message_data = response_data['message']
+            thinking_content = message_data.get('thinking', '')
+            response_content = message_data.get('content', '')
             
-            # Add assistant response to history
-            self.conversation_history.append({'role': 'assistant', 'content': assistant_message})
-            
-            return assistant_message
+            # Format the response with thinking if available
+            if use_thinking and thinking_content:
+                formatted_response = self._format_thinking_content(thinking_content, response_content)
+                # Store only the actual content in conversation history (not the formatted HTML)
+                self.conversation_history.append({'role': 'assistant', 'content': response_content})
+                return formatted_response
+            else:
+                # Fallback to original content-only format
+                assistant_message = response_content
+                self.conversation_history.append({'role': 'assistant', 'content': assistant_message})
+                return assistant_message
             
         except Exception as e:
             error_msg = f"Error in chat: {str(e)}"
@@ -329,6 +427,9 @@ class OllamaChat:
         try:
             if conversation_history is not None:
                 self.conversation_history = conversation_history
+                # Ensure system message is at the beginning if we have one
+                if self.system_message and (not self.conversation_history or self.conversation_history[0].get('role') != 'system'):
+                    self.conversation_history.insert(0, {'role': 'system', 'content': self.system_message})
 
             # Add user message to history
             self.conversation_history.append({'role': 'user', 'content': prompt})
@@ -341,6 +442,11 @@ class OllamaChat:
                 'keep_alive': '30m'
             }
             
+            # Check if thinking is supported and add parameter accordingly
+            use_thinking = self._check_thinking_support(request_params)
+            if use_thinking:
+                request_params['think'] = True
+            
             # Make the streaming request to Ollama
             response = requests.post(
                 self.endpoint,
@@ -350,6 +456,8 @@ class OllamaChat:
             response.raise_for_status()
             
             full_response = ""
+            full_thinking = ""
+            thinking_yielded = False
             
             # Process the streaming response
             for line in response.iter_lines():
@@ -357,22 +465,45 @@ class OllamaChat:
                     line = line.decode('utf-8')
                     try:
                         chunk_data = json.loads(line)
+                        message_data = chunk_data.get('message', {})
                         
-                        # Check if this chunk contains content
-                        if 'message' in chunk_data and 'content' in chunk_data['message']:
-                            content_chunk = chunk_data['message']['content']
-                            full_response += content_chunk
-                            yield content_chunk
+                        # Handle thinking content (if available and supported)
+                        if use_thinking and 'thinking' in message_data:
+                            thinking_chunk = message_data['thinking']
+                            if thinking_chunk:
+                                full_thinking += thinking_chunk
+                                
+                                # Yield formatted thinking section once when we start getting thinking
+                                if not thinking_yielded and full_thinking.strip():
+                                    thinking_yielded = True
+                                    yield '<div class="think-section think-streaming"><em>💭 Reasoning:\n'
+                                
+                                # Yield thinking content progressively
+                                yield thinking_chunk
+                        
+                        # Handle main content
+                        if 'content' in message_data:
+                            content_chunk = message_data['content']
+                            if content_chunk:
+                                # Close thinking section if we haven't started content yet
+                                if thinking_yielded and not full_response:
+                                    yield '</em></div>\n\n'
+                                
+                                full_response += content_chunk
+                                yield content_chunk
                         
                         # Check if this is the final chunk
                         if chunk_data.get('done', False):
+                            # Close any open thinking section
+                            if thinking_yielded and not full_response:
+                                yield '</em></div>'
                             break
                             
                     except json.JSONDecodeError:
                         # Skip malformed JSON lines
                         continue
             
-            # Add the complete assistant response to history
+            # Add the complete assistant response to history (content only, not HTML formatting)
             if full_response:
                 self.conversation_history.append({'role': 'assistant', 'content': full_response})
             
@@ -396,6 +527,9 @@ class OllamaChat:
         try:
             if conversation_history is not None:
                 self.conversation_history = conversation_history
+                # Ensure system message is at the beginning if we have one
+                if self.system_message and (not self.conversation_history or self.conversation_history[0].get('role') != 'system'):
+                    self.conversation_history.insert(0, {'role': 'system', 'content': self.system_message})
 
             # Add user message to history
             self.conversation_history.append({'role': 'user', 'content': prompt})
@@ -408,7 +542,14 @@ class OllamaChat:
                 'keep_alive': '30m'
             }
             
+            # Check if thinking is supported and add parameter accordingly
+            use_thinking = self._check_thinking_support(request_params)
+            if use_thinking:
+                request_params['think'] = True
+            
             full_response = ""
+            full_thinking = ""
+            thinking_yielded = False
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.endpoint, json=request_params) as response:
@@ -420,15 +561,38 @@ class OllamaChat:
                             if line:
                                 try:
                                     chunk_data = json.loads(line)
+                                    message_data = chunk_data.get('message', {})
                                     
-                                    # Check if this chunk contains content
-                                    if 'message' in chunk_data and 'content' in chunk_data['message']:
-                                        content_chunk = chunk_data['message']['content']
-                                        full_response += content_chunk
-                                        yield content_chunk
+                                    # Handle thinking content (if available and supported)
+                                    if use_thinking and 'thinking' in message_data:
+                                        thinking_chunk = message_data['thinking']
+                                        if thinking_chunk:
+                                            full_thinking += thinking_chunk
+                                            
+                                            # Yield formatted thinking section once when we start getting thinking
+                                            if not thinking_yielded and full_thinking.strip():
+                                                thinking_yielded = True
+                                                yield '<div class="think-section think-streaming"><em>💭 Reasoning:\n'
+                                            
+                                            # Yield thinking content progressively
+                                            yield thinking_chunk
+                                    
+                                    # Handle main content
+                                    if 'content' in message_data:
+                                        content_chunk = message_data['content']
+                                        if content_chunk:
+                                            # Close thinking section if we haven't started content yet
+                                            if thinking_yielded and not full_response:
+                                                yield '</em></div>\n\n'
+                                            
+                                            full_response += content_chunk
+                                            yield content_chunk
                                     
                                     # Check if this is the final chunk
                                     if chunk_data.get('done', False):
+                                        # Close any open thinking section
+                                        if thinking_yielded and not full_response:
+                                            yield '</em></div>'
                                         break
                                         
                                 except json.JSONDecodeError:
@@ -462,6 +626,7 @@ class GroqChat:
         self,
         model: str = "llama-3.3-70b-versatile",
         api_key: Optional[str] = None,
+        system_message: Optional[str] = None,
     ):
         """
         Initialize the Groq Chat.
@@ -469,6 +634,7 @@ class GroqChat:
         Args:
             model: Name of the Groq model to use
             api_key: Groq API key (if None, will try to get from environment)
+            system_message: System message to set context for the conversation
         """
         try:
             from groq import Groq
@@ -489,7 +655,12 @@ class GroqChat:
             raise ValueError("GROQ_API_KEY or GROK_API_KEY must be provided or set in environment variables")
         
         self.client = Groq(api_key=self.api_key)
+        self.system_message = system_message
         self.conversation_history = []
+        
+        # Add system message to conversation history if provided
+        if self.system_message:
+            self.conversation_history.append({'role': 'system', 'content': self.system_message})
 
     def chat(self, prompt: str, conversation_history: List[Dict[str, str]] = None) -> str:
         """
@@ -505,6 +676,9 @@ class GroqChat:
         try:
             if conversation_history is not None:
                 self.conversation_history = conversation_history
+                # Ensure system message is at the beginning if we have one
+                if self.system_message and (not self.conversation_history or self.conversation_history[0].get('role') != 'system'):
+                    self.conversation_history.insert(0, {'role': 'system', 'content': self.system_message})
 
             # Add user message to history
             self.conversation_history.append({'role': 'user', 'content': prompt})
@@ -544,6 +718,9 @@ class GroqChat:
         try:
             if conversation_history is not None:
                 self.conversation_history = conversation_history
+                # Ensure system message is at the beginning if we have one
+                if self.system_message and (not self.conversation_history or self.conversation_history[0].get('role') != 'system'):
+                    self.conversation_history.insert(0, {'role': 'system', 'content': self.system_message})
 
             # Add user message to history
             self.conversation_history.append({'role': 'user', 'content': prompt})

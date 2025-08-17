@@ -3,6 +3,7 @@ function streamingChatApp() {
         messages: [],
         currentMessage: '',
         isLoading: false,
+        loadingMessage: 'Thinking',
         messageId: 0,
         statusMessage: 'Ready to chat!',
         currentEventSource: null,
@@ -11,6 +12,7 @@ function streamingChatApp() {
         maxRetries: 2,
         autoScrollEnabled: true,  // Track if auto-scroll is enabled
         scrollThreshold: 50,      // Pixels from bottom to consider "at bottom"
+        lastSearchData: null,     // Store last search data for toggle display
         
         init() {
             // Note: Markdown processing now happens on the backend
@@ -110,36 +112,10 @@ function streamingChatApp() {
         },
 
         processThinkTags(content) {
-            // Think tag processing now happens on the backend
-            // This function is kept for backward compatibility with old messages
-            // Check if content starts with <think> and contains </think>
-            const thinkRegex = /^(<think>)([\s\S]*?)(<\/think>)([\s\S]*)$/;
-            const match = content.match(thinkRegex);
-            
-            if (match) {
-                const [, openTag, thinkContent, closeTag, remainingContent] = match;
-                
-                // Clean up the think content - preserve newlines and structure
-                const cleanThinkContent = thinkContent.trim();
-                
-                // Format the think section with special styling
-                const formattedThinkSection = `<div class="think-section"><em>${openTag}\n${cleanThinkContent}\n${closeTag}</em></div>`;
-                
-                // Add proper spacing after think section
-                if (remainingContent.trim()) {
-                    return formattedThinkSection + '\n\n' + remainingContent.trim();
-                } else {
-                    return formattedThinkSection;
-                }
-            }
-            
-            // If we're in the middle of streaming and see <think> at the start but no closing tag yet,
-            // we'll format it differently to show it's in progress
-            if (content.startsWith('<think>') && !content.includes('</think>')) {
-                // Format as in-progress think section
-                return `<div class="think-section think-streaming"><em>${content}</em></div>`;
-            }
-            
+            // Thinking tag processing now happens on the backend for all configured patterns
+            // Backend supports multiple thinking patterns from config.yaml including:
+            // <think>, <analysis>, <reasoning>, "Thinking...", etc.
+            // This method now just passes through since backend handles all formatting
             return content;
         },
 
@@ -221,8 +197,21 @@ function streamingChatApp() {
                         currentModel = 'qwen2.5:7b'; // Ultimate fallback
                     }
                 }
+                // Get search settings from the UI
+                const searchToggle = document.getElementById('search-toggle');
+                const searchCountInput = document.getElementById('search-count');
+                const searchEnabled = searchToggle ? searchToggle.checked : false;
+                const searchCount = searchCountInput ? parseInt(searchCountInput.value) || 5 : 5;
+                
+                // Debug logging (uncomment for debugging)
+                // console.log('DEBUG: Search toggle element:', searchToggle);
+                // console.log('DEBUG: Search count input element:', searchCountInput);
+                // console.log('DEBUG: Search toggle checked:', searchToggle ? searchToggle.checked : 'null');
+                // console.log('DEBUG: Search count value:', searchCountInput ? searchCountInput.value : 'null');
                 console.log('Using model for streaming:', currentModel);
-                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}&session=${sessionId}`);
+                console.log('Search enabled:', searchEnabled, 'Search count:', searchCount);
+                
+                const eventSource = new EventSource(`/chat/stream-sse?message=${encodeURIComponent(userMessage)}&model=${encodeURIComponent(currentModel)}&session=${sessionId}&search_enabled=${searchEnabled}&search_count=${searchCount}`);
                 this.currentEventSource = eventSource;
                 
                 // Add connection state tracking
@@ -238,7 +227,17 @@ function streamingChatApp() {
                     try {
                         const data = JSON.parse(event.data);
                         
-                        if (data.type === 'chunk' && data.content) {
+                        if (data.type === 'search_start') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = data.message;
+                        } else if (data.type === 'search_complete') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = 'Thinking';
+                        } else if (data.type === 'search_error') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = 'Thinking';
+                            console.warn('Search error:', data.message);
+                        } else if (data.type === 'chunk' && data.content) {
                             hasReceivedData = true;
                             // Find the assistant message and update content
                             const assistantMsg = this.messages.find(m => m.id === assistantMessageId);
@@ -269,6 +268,11 @@ function streamingChatApp() {
                                 if (data.final_formatted) {
                                     assistantMsg.content = data.final_formatted;
                                 }
+                                // Store raw search data if available
+                                if (data.raw_search_data) {
+                                    assistantMsg.searchData = data.raw_search_data;
+                                    this.lastSearchData = data.raw_search_data;
+                                }
                             }
                             
                             // Update stats from backend if provided
@@ -280,6 +284,7 @@ function streamingChatApp() {
                             this.currentEventSource = null;
                             this.isLoading = false;
                             this.statusMessage = 'Response complete';
+                            this.loadingMessage = 'Thinking';
                             setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
                             
                             // Return focus to input box after response is complete
@@ -582,6 +587,22 @@ function streamingChatApp() {
                 configPanel.chatStats.currentModel = stats.currentModel || 'Unknown';
                 configPanel.chatStats.status = stats.status || 'Ready';
             }
+        },
+        
+        // Toggle search results display
+        toggleSearchResults(messageId) {
+            const message = this.messages.find(m => m.id === messageId);
+            if (message && message.searchData) {
+                message.showSearchResults = !message.showSearchResults;
+                this.$nextTick(() => {
+                    this.scrollToBottom();
+                });
+            }
+        },
+        
+        // Check if message has search data
+        hasSearchData(message) {
+            return message.searchData && message.searchData.results && message.searchData.results.length > 0;
         }
     }
 }
