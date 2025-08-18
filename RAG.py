@@ -49,9 +49,8 @@ class RecursiveCharacterTextSplitter:
             "\n\n",  # Paragraphs
             "\n",    # Lines
             " ",     # Words
-            "",      # Characters
         ]
-    
+
     def split_text(self, text: str) -> List[TextChunk]:
         """
         Split text into chunks using recursive character splitting.
@@ -80,7 +79,9 @@ class RecursiveCharacterTextSplitter:
                 break
             
             # Try to find a good split point using separators
-            split_point = self._find_split_point(text, current_position, end_position)
+            proposed_split = self._find_split_point(text, current_position, end_position)
+            # Snap to a word boundary to avoid splitting words in half
+            split_point = self._snap_to_word_boundary(text, current_position, end_position, proposed_split)
             
             chunk_text = text[current_position:split_point]
             chunks.append(TextChunk(
@@ -124,6 +125,48 @@ class RecursiveCharacterTextSplitter:
         # If no separator found, split at the character level
         return end
 
+    def _is_word_char(self, ch: str) -> bool:
+        """Return True if character is considered part of a word (alnum or underscore)."""
+        return ch.isalnum() or ch == "_"
+
+    def _snap_to_word_boundary(self, text: str, start: int, end: int, proposed: int) -> int:
+        """
+        Adjust the proposed split point so we don't split a word in half.
+
+        Strategy:
+        - If proposed is already at a boundary (or at text edges), keep it.
+        - Else, search backward to the nearest non-word char; if found, split after it.
+        - Else, search forward up to a small cap for the next non-word char and split after it.
+        - If none found, keep proposed to ensure progress.
+        """
+        if proposed <= start:
+            return min(end, len(text))
+        if proposed >= len(text):
+            return len(text)
+
+        # If boundary between word/non-word, it's safe
+        left_is_word = self._is_word_char(text[proposed - 1])
+        right_is_word = self._is_word_char(text[proposed]) if proposed < len(text) else False
+        if not (left_is_word and right_is_word):
+            return proposed
+
+        # Search backward for a non-word character between start and proposed
+        for i in range(proposed - 1, start - 1, -1):
+            if not self._is_word_char(text[i]):
+                # split right after the non-word char
+                adjusted = i + 1
+                # Ensure we don't return start (would create empty chunk)
+                return adjusted if adjusted > start else min(end, len(text))
+
+        # If none backward, search forward up to a cap for a non-word character
+        forward_cap = min(len(text) - 1, end + max(50, self.chunk_size // 10))
+        for j in range(proposed, forward_cap + 1):
+            if not self._is_word_char(text[j]):
+                return j + 1
+
+        # Give up: return proposed to ensure progress
+        return proposed
+
 class TextRetriever:
     """
     Text retrieval system using Ollama embeddings and recursive character splitting.
@@ -154,20 +197,21 @@ class TextRetriever:
         
         logger.info(f"Initialized TextRetriever with model: {self.embedding_model}")
     
-    def process_text(self, text: str) -> None:
+    async def process_text(self, text: str) -> None:
         """
-        Process a large text by splitting it into chunks and generating embeddings.
-        
+        Async version: process a large text by splitting it into chunks and
+        generating embeddings.
+
         Args:
             text: The input text to process
         """
         logger.info(f"Processing text of {len(text)} characters")
-        
+
         # Split text into chunks
         self.chunks = self.text_splitter.split_text(text)
-        
-        # Generate embeddings for all chunks
-        asyncio.run(self._generate_embeddings())
+
+        # Generate embeddings for all chunks (await within the running loop)
+        await self._generate_embeddings()
     
     async def _generate_embeddings(self) -> None:
         """Generate embeddings for all chunks using Ollama."""
@@ -317,24 +361,154 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
         return {
             'text_retriever': {
                 'embedding_model': 'nomic-embed-text',
-                'chunk_size': 1000,
-                'chunk_overlap': 200,
-                'top_k': 5
+                'chunk_size': 5000,
+                'chunk_overlap': 1000,
+                'top_k': 7
             }
         }
 
+
+
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extract text from a PDF file using PyPDF2 if available.
+
+    Returns an empty string on failure or if PyPDF2 is not installed.
+    """
+    try:
+        import PyPDF2
+    except Exception:
+        logger.warning("PyPDF2 not installed or failed to import; cannot read PDF files")
+        return ""
+
+    try:
+        text_parts = []
+        with open(pdf_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                text_parts.append(page_text)
+        return "\n\n".join(text_parts).strip()
+    except Exception as e:
+        logger.error(f"Failed to extract text from PDF {pdf_path}: {e}")
+        return ""
+
+
+def load_sample_text(pdf_path: Optional[str] = None) -> str:
+    """Load sample text from a PDF if given and available, otherwise return the embedded sample text.
+
+    Args:
+        pdf_path: Optional path to a PDF file to extract text from.
+    """
+    if pdf_path:
+        try:
+            if os.path.exists(pdf_path):
+                extracted = extract_text_from_pdf(pdf_path)
+                if extracted:
+                    logger.info(f"Loaded sample text from PDF: {pdf_path}")
+                    return extracted
+                else:
+                    logger.warning(f"No text extracted from PDF {pdf_path}; using embedded sample")
+            else:
+                logger.info(f"PDF not found at {pdf_path}; using embedded sample")
+        except Exception as e:
+            logger.error(f"Error while attempting to load PDF {pdf_path}: {e}")
+
+    return EMBEDDED_SAMPLE_TEXT
+
+
+# Embedded sample text used as a fallback when no PDF is provided or extraction fails.
+EMBEDDED_SAMPLE_TEXT = """
+Artificial Intelligence (AI) is a broad field of computer science focused on creating systems capable of performing tasks that typically require human intelligence. These tasks include learning, reasoning, problem-solving, perception, and language understanding.
+
+Machine Learning is a subset of AI that enables computers to learn and improve from experience without being explicitly programmed. It uses algorithms to identify patterns in data and make predictions or decisions based on that data.
+
+Deep Learning is a specialized branch of machine learning that uses artificial neural networks with multiple layers to model and understand complex patterns in data. It has been particularly successful in areas like image recognition, natural language processing, and speech recognition.
+
+Natural Language Processing (NLP) is another important area of AI that focuses on the interaction between computers and human language. It enables computers to understand, interpret, and generate human language in a valuable way.
+
+Computer Vision is the field of AI that enables computers to interpret and understand visual information from the world around them. This includes tasks like object detection, facial recognition, and scene understanding.
+
+Reinforcement Learning is a type of machine learning where an agent learns to make decisions by taking actions in an environment and receiving rewards or penalties based on those actions.
+
+The applications of AI are vast and growing, including autonomous vehicles, medical diagnosis, financial trading, recommendation systems, virtual assistants, and many other domains that benefit from intelligent automation.
+"""
+
+
+# -------------------- Ollama model warm-up helpers --------------------
+async def load_ollama_models(models: List[str], endpoint: str = "http://localhost:11434", keepalive_minutes: int = 30) -> Dict[str, Dict[str, Any]]:
+    """
+    Ask Ollama to load the given models and keep them alive for the specified duration.
+
+    This function posts to Ollama's APIs to trigger a model load and sets keep-alive
+    to reduce cold start latency for subsequent requests.
+
+    Args:
+        models: List of Ollama model names (e.g., ["llama3", "nomic-embed-text"]).
+        endpoint: Ollama server endpoint (default http://localhost:11434).
+        keepalive_minutes: Keep-alive duration in minutes (default 30).
+
+    Returns:
+        Dict mapping model name -> {"ok": bool, "method": str, "error": Optional[str]}
+    """
+    keep_alive = f"{keepalive_minutes}m"
+
+    async def _warm_model(session: aiohttp.ClientSession, model: str) -> Tuple[str, Dict[str, Any]]:
+        # Try /api/generate first (works for chat/instruct models)
+        gen_url = f"{endpoint}/api/generate"
+        gen_payload = {
+            "model": model,
+            "prompt": " ",        # minimal no-op prompt
+            "stream": False,
+            "keep_alive": keep_alive,
+        }
+        try:
+            async with session.post(gen_url, json=gen_payload) as resp:
+                if resp.status == 200:
+                    # Model warmed via generate
+                    return model, {"ok": True, "method": "generate", "error": None}
+                # If not supported (e.g., embedding-only), try embeddings API
+        except Exception as e:
+            gen_error = str(e)
+        else:
+            gen_error = await resp.text()
+
+        # Fallback: /api/embeddings (works for embedding models)
+        emb_url = f"{endpoint}/api/embeddings"
+        emb_payload = {
+            "model": model,
+            "prompt": "warm up",
+            "keep_alive": keep_alive,
+        }
+        try:
+            async with session.post(emb_url, json=emb_payload) as resp2:
+                if resp2.status == 200:
+                    return model, {"ok": True, "method": "embeddings", "error": None}
+                emb_error = await resp2.text()
+        except Exception as e2:
+            emb_error = str(e2)
+
+        return model, {"ok": False, "method": "none", "error": f"generate_error={gen_error}; embeddings_error={emb_error}"}
+
+    results: Dict[str, Dict[str, Any]] = {}
+    async with aiohttp.ClientSession() as session:
+        tasks = [_warm_model(session, m) for m in models]
+        for model, res in await asyncio.gather(*tasks):
+            results[model] = res
+
+    return results
+
+
+def load_ollama_models_sync(models: List[str], endpoint: str = "http://localhost:11434", keepalive_minutes: int = 30) -> Dict[str, Dict[str, Any]]:
+    """
+    Synchronous wrapper for load_ollama_models for convenience in non-async contexts.
+    WARNING: Do not call this from within an existing event loop.
+    """
+    return asyncio.run(load_ollama_models(models, endpoint=endpoint, keepalive_minutes=keepalive_minutes))
+
 async def main():
-    from tavily import TavilyClient
-    import asyncio
-    from IPython.display import display, Markdown
-    tavily_client = TavilyClient()
-    # Step 1: Search with advanced parameters
-    search_response = tavily_client.search(
-        query="Explain the recent International news in detail",
-        search_depth="advanced",
-        include_raw_content=True,
-        max_results=10
-    )
+
+    
 
     """
     Example usage of the TextRetriever class.
@@ -347,49 +521,30 @@ async def main():
     # Initialize retriever
     retriever = TextRetriever(config)
     
-    # Sample text to process
-    sample_text = """
-    Artificial Intelligence (AI) is a broad field of computer science focused on creating systems capable of performing tasks that typically require human intelligence. These tasks include learning, reasoning, problem-solving, perception, and language understanding.
+    # Load sample text from `sample.pdf` if present; otherwise use embedded sample text.
+    sample_text = load_sample_text(r'/home/nitish/Downloads/Papers/ML Papers/randomforest2001.pdf')
 
-    Machine Learning is a subset of AI that enables computers to learn and improve from experience without being explicitly programmed. It uses algorithms to identify patterns in data and make predictions or decisions based on that data.
-
-    Deep Learning is a specialized branch of machine learning that uses artificial neural networks with multiple layers to model and understand complex patterns in data. It has been particularly successful in areas like image recognition, natural language processing, and speech recognition.
-
-    Natural Language Processing (NLP) is another important area of AI that focuses on the interaction between computers and human language. It enables computers to understand, interpret, and generate human language in a valuable way.
-
-    Computer Vision is the field of AI that enables computers to interpret and understand visual information from the world around them. This includes tasks like object detection, facial recognition, and scene understanding.
-
-    Reinforcement Learning is a type of machine learning where an agent learns to make decisions by taking actions in an environment and receiving rewards or penalties based on those actions.
-
-    The applications of AI are vast and growing, including autonomous vehicles, medical diagnosis, financial trading, recommendation systems, virtual assistants, and many other domains that benefit from intelligent automation.
-    """
-    
     print(f"Processing sample text ({len(sample_text)} characters)...")
-    
-    # Process the text
-    retriever.process_text(sample_text)
+
+    # Process the text (async)
+    await retriever.process_text(sample_text)
     
     print(f"Text split into {len(retriever.chunks)} chunks")
     
     # Example queries
-    queries = [
-        "What is machine learning?",
-        "How does deep learning work?",
-        "What are the applications of AI?",
-        "Tell me about computer vision"
-    ]
-    
+    queries = ["Explain the random forest algorithm"]
+
     for query in queries:
         print(f"\n--- Query: {query} ---")
         
         # Retrieve relevant chunks
-        results = await retriever.retrieve(query, top_k=3)
+        results = await retriever.retrieve(query, top_k=7)
         
         if results:
             print("Retrieved chunks:")
             for i, (chunk, similarity) in enumerate(results, 1):
                 print(f"\n{i}. Similarity: {similarity:.3f}")
-                print(f"   Content: {chunk.content[:200]}...")
+                print(f"   Content: {chunk.content[:]}... \n\n\n\n\n")
             
             # Get formatted context
             context = retriever.get_context_string(results)

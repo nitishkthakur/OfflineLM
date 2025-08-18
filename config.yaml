@@ -34,7 +34,7 @@ text_retriever:
   embedding_model: "nomic-embed-text"  # Ollama embedding model
   chunk_size: 5000  # Characters per chunk
   chunk_overlap: 1000  # Character overlap between chunks
-  top_k: 5  # Number of top chunks to retrieve
+  top_k: 7  # Number of top chunks to retrieve
 
 # System instructions for different modes
 system_instructions:
