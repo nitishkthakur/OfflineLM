@@ -51,7 +51,8 @@ OfflineLM is a streaming chat application that provides an interactive interface
 ### API Endpoints
 
 - `GET /` - Serves the main chat interface
-- `GET /chat/stream-sse` - Primary streaming endpoint with session management
+- `GET /chat/stream-sse` - Legacy streaming endpoint with URL parameters
+- `POST /chat/stream-sse-v2` - New streaming endpoint with configuration support
 - `POST /change-model` - Model switching with conversation history preservation
 - `GET /models` - Lists available Ollama models
 - `POST /download-chat-pdf` - Generates PDF export of conversations
@@ -76,6 +77,95 @@ OfflineLM is a streaming chat application that provides an interactive interface
 - ReportLab (PDF generation)
 - markdown, pygments (content formatting)
 - Pydantic (data validation)
+
+## Chat Configuration System
+
+### Overview
+The application now supports a comprehensive configuration system that allows dynamic control of various features through a structured config object passed from frontend to backend.
+
+### Configuration Structure
+```python
+class ChatConfig(BaseModel):
+    search: SearchConfig = SearchConfig()
+    rag: RagConfig = RagConfig()
+    # Future feature flags for extensibility
+    summary_enabled: bool = False
+    voice_enabled: bool = False
+    analytics_enabled: bool = False
+
+class SearchConfig(BaseModel):
+    enabled: bool = False
+    count: int = Field(default=5, ge=1, le=20)
+
+class RagConfig(BaseModel):
+    enabled: bool = False
+    chunks: int = Field(default=5, ge=1, le=10)
+    text: Optional[str] = None
+```
+
+### Feature Configurations
+
+#### Search Configuration
+- **enabled**: Boolean flag to enable/disable web search functionality
+- **count**: Number of search results to retrieve (1-20)
+- Requires `TAVILY_API_KEY` environment variable
+- When enabled, searches the web and provides context to the LLM
+
+#### RAG Configuration
+- **enabled**: Boolean flag to enable/disable RAG (Retrieval-Augmented Generation)
+- **chunks**: Number of relevant chunks to retrieve (1-10)
+- **text**: Optional text content for RAG processing
+- Currently implemented as placeholder (returns empty context)
+- Future implementation will support document chunking and similarity search
+
+#### Future Feature Flags
+- **summary_enabled**: Enable automatic conversation summarization
+- **voice_enabled**: Enable voice input/output capabilities
+- **analytics_enabled**: Enable usage analytics and tracking
+
+### API Usage
+
+#### New Endpoint (Recommended)
+```http
+POST /chat/stream-sse-v2
+Content-Type: application/json
+
+{
+  "message": "Your question here",
+  "config": {
+    "search": {
+      "enabled": true,
+      "count": 5
+    },
+    "rag": {
+      "enabled": false,
+      "chunks": 5
+    },
+    "summary_enabled": false,
+    "voice_enabled": false,
+    "analytics_enabled": false
+  }
+}
+```
+
+#### Legacy Endpoint (Backward Compatible)
+```http
+GET /chat/stream-sse?message=query&search_enabled=true&search_count=5&rag_enabled=false&rag_chunks=5
+```
+
+### Frontend Integration
+The frontend automatically reads UI toggle states and constructs the configuration object:
+- Search toggle and count input → `config.search`
+- RAG toggle and chunks input → `config.rag`
+- Future UI elements will map to respective config flags
+
+### Processing Flow
+1. **Frontend**: User presses send button
+2. **Frontend**: Reads UI state and constructs config object
+3. **Frontend**: Sends message + config to backend via POST
+4. **Backend**: Parses config and enables requested features
+5. **Backend**: Processes search/RAG if enabled
+6. **Backend**: Streams response with enhanced context
 
 ## Development Notes
 

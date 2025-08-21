@@ -33,7 +33,7 @@ class RecursiveCharacterTextSplitter:
     of text first (paragraphs, lines, words) before falling back to characters.
     """
     
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+    def __init__(self, chunk_size: int = 5000, chunk_overlap: int = 1000):
         """
         Initialize the text splitter.
         
@@ -182,8 +182,8 @@ class TextRetriever:
         retriever_config = config.get('text_retriever', {})
         
         self.embedding_model = retriever_config.get('embedding_model', 'nomic-embed-text')
-        self.chunk_size = retriever_config.get('chunk_size', 1000)
-        self.chunk_overlap = retriever_config.get('chunk_overlap', 200)
+        self.chunk_size = retriever_config.get('chunk_size', 5000)
+        self.chunk_overlap = retriever_config.get('chunk_overlap', 1000)
         self.top_k = retriever_config.get('top_k', 5)
         self.ollama_endpoint = "http://localhost:11434"
         

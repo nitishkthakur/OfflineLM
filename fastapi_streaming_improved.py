@@ -6,7 +6,8 @@ Improved FastAPI streaming chat with proper Server-Sent Events implementation.
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
 import json
 import uuid
 import os
@@ -376,8 +377,26 @@ def initialize_chat_agent():
 # Initialize the chat agents with the first available model
 default_model = initialize_chat_agent()
 
+class SearchConfig(BaseModel):
+    enabled: bool = False
+    count: int = Field(default=5, ge=1, le=20)
+
+class RagConfig(BaseModel):
+    enabled: bool = False
+    chunks: int = Field(default=5, ge=1, le=10)
+    text: Optional[str] = None
+
+class ChatConfig(BaseModel):
+    search: SearchConfig = SearchConfig()
+    rag: RagConfig = RagConfig()
+    # Future feature flags for extensibility
+    summary_enabled: bool = False
+    voice_enabled: bool = False
+    analytics_enabled: bool = False
+
 class ChatMessage(BaseModel):
     message: str
+    config: ChatConfig = ChatConfig()
 
 class ModelChangeRequest(BaseModel):
     model: str
@@ -632,12 +651,25 @@ async def get_default_model():
         "status": "success"
     }
 
-@app.get("/chat/stream-sse")
-async def chat_stream_sse(message: str, model: str = None, session: str = None, search_enabled: bool = False, search_count: int = 5):
-    """Stream chat responses using Server-Sent Events with EventSource."""
+@app.post("/chat/stream-sse-v2")
+async def chat_stream_sse_v2(chat_request: ChatMessage, model: str = None, session: str = None):
+    """Stream chat responses using Server-Sent Events with configuration support."""
+    message = chat_request.message
+    config = chat_request.config
+    
+    # Extract legacy parameters for backward compatibility with existing logic
+    search_enabled = config.search.enabled
+    search_count = config.search.count
+    rag_enabled = config.rag.enabled
+    rag_chunks = config.rag.chunks
+    
+    return await _chat_stream_sse_internal(message, model, session, search_enabled, search_count, rag_enabled, rag_chunks)
+
+async def _chat_stream_sse_internal(message: str, model: str = None, session: str = None, search_enabled: bool = False, search_count: int = 5, rag_enabled: bool = False, rag_chunks: int = 5):
+    """Internal function for streaming chat responses with configuration support."""
     
     # Optional debug logging (uncomment for debugging)
-    # print(f"DEBUG: Stream request - search_enabled={search_enabled}, search_count={search_count}, message='{message[:50]}...'")
+    # print(f"DEBUG: Stream request - search_enabled={search_enabled}, search_count={search_count}, rag_enabled={rag_enabled}, rag_chunks={rag_chunks}, message='{message[:50]}...'")
     
     async def generate():
         try:
@@ -775,14 +807,54 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None, 
             # else:
                 # print(f"DEBUG: Search disabled by user")  # Debug line
             
+            # Check if RAG is enabled and perform RAG retrieval if needed
+            rag_context = None
+            if rag_enabled:
+                # print(f"DEBUG: RAG enabled - attempting retrieval for: {message[:50]}...")  # Debug line
+                try:
+                    yield f"data: {json.dumps({'type': 'rag_start', 'message': f'Retrieving relevant context ({rag_chunks} chunks)...'})}\n\n"
+                    
+                    # TODO: Implement RAG retrieval logic here
+                    # For now, keep the RAG response empty as requested
+                    # Future implementation would:
+                    # 1. Load embeddings from processed text
+                    # 2. Perform similarity search
+                    # 3. Retrieve top chunks
+                    # 4. Format context for LLM
+                    
+                    # Placeholder for future RAG implementation
+                    rag_context = ""  # Empty for now as requested
+                    
+                    if rag_context:
+                        # If RAG context exists, combine it with the message
+                        if search_enabled and final_message != message:
+                            # If both search and RAG are enabled, combine contexts
+                            final_message = f"{final_message}\n\n--- RAG Context ---\n{rag_context}"
+                        else:
+                            # If only RAG is enabled, use RAG context with original message
+                            final_message = f"{message}\n\n--- Relevant Context ---\n{rag_context}"
+                        
+                        # Log the RAG context length
+                        log_prompt_length("RAG_CONTEXT", rag_context, model or "default")
+                        
+                        yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'Context retrieval complete, generating response...'})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'No relevant context found, proceeding without RAG...'})}\n\n"
+                    
+                except Exception as rag_error:
+                    print(f"RAG error: {rag_error}")
+                    yield f"data: {json.dumps({'type': 'rag_error', 'message': f'RAG retrieval failed: {str(rag_error)}. Proceeding without RAG...'})}\n\n"
+            # else:
+                # print(f"DEBUG: RAG disabled by user")  # Debug line
+            
             yield f"data: {json.dumps({'type': 'start', 'message': 'Starting response...'})}\n\n"
             
             # Stream with interruption checking and backend formatting
             full_response = ""
             try:
-                # Check if we need special handling for search to preserve conversation history
-                if search_enabled and final_message != message:
-                    # For search: Store original user message in history, but send search context to LLM
+                # Check if we need special handling for search/RAG to preserve conversation history
+                if (search_enabled or rag_enabled) and final_message != message:
+                    # For search/RAG: Store original user message in history, but send enhanced context to LLM
                     # First manually add the original user message to conversation history
                     current_agent.conversation_history.append({'role': 'user', 'content': message})
                     
@@ -1064,6 +1136,11 @@ async def chat_stream_sse(message: str, model: str = None, session: str = None, 
             "Access-Control-Allow-Headers": "Content-Type",
         }
     )
+
+@app.get("/chat/stream-sse")
+async def chat_stream_sse(message: str, model: str = None, session: str = None, search_enabled: bool = False, search_count: int = 5, rag_enabled: bool = False, rag_chunks: int = 5):
+    """Stream chat responses using Server-Sent Events with EventSource (legacy endpoint)."""
+    return await _chat_stream_sse_internal(message, model, session, search_enabled, search_count, rag_enabled, rag_chunks)
 
 async def force_stop_ollama_generation(model_name: str):
     """Force stop OLLAMA model generation to reduce CPU usage to zero."""
