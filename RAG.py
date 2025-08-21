@@ -355,6 +355,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
+            logger.info(f"Loading configuration from {config_path}")
             return yaml.safe_load(f)
     except FileNotFoundError:
         logger.warning(f"Config file {config_path} not found, using defaults")
@@ -363,7 +364,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
                 'embedding_model': 'nomic-embed-text',
                 'chunk_size': 5000,
                 'chunk_overlap': 1000,
-                'top_k': 7
+                'top_k': 2
             }
         }
 
