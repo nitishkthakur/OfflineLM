@@ -154,6 +154,20 @@ GROQ_MODELS = [
         'provider': 'groq',
         'size': '70B',
         'modified_at': 'Available'
+    },
+    {
+        'name': 'compound-beta',
+        'displayName': 'Compound Beta',
+        'provider': 'groq',
+        'size': 'Beta',
+        'modified_at': 'Available'
+    },
+    {
+        'name': 'compound-beta-mini',
+        'displayName': 'Compound Beta Mini',
+        'provider': 'groq',
+        'size': 'Beta',
+        'modified_at': 'Available'
     }
 ]
 
@@ -737,8 +751,9 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                     if not api_key:
                         yield f"data: {json.dumps({'type': 'search_error', 'message': 'Search disabled: TAVILY_API_KEY not configured. Proceeding without search...'})}\n\n"
                         # print("DEBUG: Search skipped - no API key")  # Debug line
+                        search_results = message  # Use original message when search unavailable
                     else:
-                        yield f"data: {json.dumps({'type': 'search_start', 'message': 'Searching...'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'search_start', 'message': f'Searching ({search_count} sites) and thinking...'})}\n\n"
                         
                         # Initialize TavilySearcher with config values
                         search_config = config.get('search', {})
@@ -866,16 +881,17 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                             # Log the search results length before sending to LLM
                             log_prompt_length("SEARCH_CONTEXT", final_message, model or "default")
                             
-                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Thinking...'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, generating response...'})}\n\n"
                         else:
                             # Search+RAG mode: keep search results for RAG processing
-                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Thinking...'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, processing with RAG...'})}\n\n"
                         # print(f"DEBUG: Search completed successfully - context length: {len(search_results)}")  # Debug line
                     
                 except Exception as search_error:
                     print(f"Search error: {search_error}")
                     yield f"data: {json.dumps({'type': 'search_error', 'message': f'Search failed: {str(search_error)}. Proceeding without search...'})}\n\n"
                     # Continue with original message if search fails
+                    search_results = message
                     final_message = message
             # else:
                 # print(f"DEBUG: Search disabled by user")  # Debug line

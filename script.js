@@ -244,6 +244,22 @@ function streamingChatApp() {
                             this.statusMessage = data.message;
                             this.loadingMessage = 'Thinking';
                             console.warn('Search error:', data.message);
+                        } else if (data.type === 'rag_start') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = data.message;
+                        } else if (data.type === 'rag_processing') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = data.message;
+                        } else if (data.type === 'rag_complete') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = 'Thinking';
+                        } else if (data.type === 'rag_error') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = 'Thinking';
+                            console.warn('RAG error:', data.message);
+                        } else if (data.type === 'context_loaded') {
+                            this.statusMessage = data.message;
+                            this.loadingMessage = 'Thinking';
                         } else if (data.type === 'chunk' && data.content) {
                             hasReceivedData = true;
                             // Find the assistant message and update content
