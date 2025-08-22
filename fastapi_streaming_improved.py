@@ -713,6 +713,7 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
             # Check if search is enabled and perform search if needed
             final_message = message
             raw_search_data = None
+            search_results = None
             if search_enabled:
                 # print(f"DEBUG: Search enabled - attempting search for: {message[:50]}...")  # Debug line
                 try:
@@ -733,7 +734,7 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                             chunks_per_source=search_config.get('chunks_per_source', 2)
                         )
                         
-                        # Get raw search results for the frontend
+                        # Get raw search results for the frontend AND for RAG processing
                         raw_search_results = await searcher.search(
                             query=message,
                             max_results=search_count
@@ -743,60 +744,95 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                         if "error" not in raw_search_results:
                             raw_search_data = {
                                 'query': message,
-
-
-
                                 'results': []
                             }
                             
-                            # Format the exact chunks that will be sent to LLM (mirroring search_wrapper_for_llm_input logic)
-                            for i, result in enumerate(raw_search_results.get('results', []), 1):
-                                # Use the same logic as search_wrapper_for_llm_input to determine content
-                                raw_content = result.get('raw_content', '')
-                                content = result.get('content', '')
-                                url = result.get('url', 'No URL')
-                                title = result.get('title', '')
-                                
-                                # Use raw content if config allows it AND it's not too long, otherwise use snippet
-                                if search_config.get('include_raw_content', True) and raw_content and len(raw_content) < 2000:
-                                    used_content = raw_content
-                                elif content:
-                                    used_content = content
-                                else:
-                                    continue
-                                
-                                if used_content:
-                                    # Create the exact context entry that will be sent to LLM
-                                    if title:
-                                        formatted_content = f"**{title}**\n{used_content}"
+                            # Special handling when both search and RAG are enabled
+                            if rag_enabled:
+                                # For search+RAG: preserve ALL raw content without truncation
+                                for i, result in enumerate(raw_search_results.get('results', []), 1):
+                                    raw_content = result.get('raw_content', '')
+                                    content = result.get('content', '')
+                                    url = result.get('url', 'No URL')
+                                    title = result.get('title', '')
+                                    
+                                    # Always use raw content when RAG is enabled, regardless of length
+                                    if raw_content:
+                                        used_content = raw_content
+                                    elif content:
+                                        used_content = content
                                     else:
-                                        formatted_content = used_content
+                                        continue
                                     
-                                    # Add source information exactly as in search_wrapper_for_llm_input
-                                    chunk_header = f"\n--- Source {i}: {url} ---\n"
-                                    formatted_chunk = f"{chunk_header}{formatted_content}"
+                                    if used_content:
+                                        # Create the exact context entry that will be sent to RAG
+                                        if title:
+                                            formatted_content = f"**{title}**\n{used_content}"
+                                        else:
+                                            formatted_content = used_content
+                                        
+                                        # Add source information for RAG processing
+                                        chunk_header = f"\n--- Source {i}: {url} ---\n"
+                                        formatted_chunk = f"{chunk_header}{formatted_content}"
+                                        
+                                        raw_search_data['results'].append({
+                                            'url': url,
+                                            'llm_input_chunk': formatted_chunk  # The exact text sent to RAG
+                                        })
+                            else:
+                                # Normal search processing (existing logic)
+                                for i, result in enumerate(raw_search_results.get('results', []), 1):
+                                    raw_content = result.get('raw_content', '')
+                                    content = result.get('content', '')
+                                    url = result.get('url', 'No URL')
+                                    title = result.get('title', '')
                                     
-                                    raw_search_data['results'].append({
-                                        'url': url,
-                                        'llm_input_chunk': formatted_chunk  # The exact text sent to LLM for this result
-                                    })
+                                    # Use raw content if config allows it AND it's not too long, otherwise use snippet
+                                    if search_config.get('include_raw_content', True) and raw_content and len(raw_content) < 2000:
+                                        used_content = raw_content
+                                    elif content:
+                                        used_content = content
+                                    else:
+                                        continue
+                                    
+                                    if used_content:
+                                        # Create the exact context entry that will be sent to LLM
+                                        if title:
+                                            formatted_content = f"**{title}**\n{used_content}"
+                                        else:
+                                            formatted_content = used_content
+                                        
+                                        # Add source information exactly as in search_wrapper_for_llm_input
+                                        chunk_header = f"\n--- Source {i}: {url} ---\n"
+                                        formatted_chunk = f"{chunk_header}{formatted_content}"
+                                        
+                                        raw_search_data['results'].append({
+                                            'url': url,
+                                            'llm_input_chunk': formatted_chunk  # The exact text sent to LLM for this result
+                                        })
                         
-                        # Perform search using search_wrapper_for_llm_input for LLM
-                        search_results = await searcher.search_wrapper_for_llm_input(
-                            query=message,
-                            max_results=search_count
-                        )
+                        # Only perform direct search for LLM if RAG is NOT enabled
+                        if not rag_enabled:
+                            search_results = await searcher.search_wrapper_for_llm_input(
+                                query=message,
+                                max_results=search_count
+                            )
                         
                         # Close the searcher
                         await searcher.close()
                         
-                        # Use search results as the message to LLM
-                        final_message = search_results
-                        
-                        # Log the search results length before sending to LLM
-                        log_prompt_length("SEARCH_CONTEXT", final_message, model or "default")
-                        
-                        yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, generating response...'})}\n\n"
+                        # Set final_message appropriately based on whether RAG is enabled
+                        if not rag_enabled:
+                            # Use search results directly for LLM
+                            final_message = search_results
+                            
+                            # Log the search results length before sending to LLM
+                            log_prompt_length("SEARCH_CONTEXT", final_message, model or "default")
+                            
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, generating response...'})}\n\n"
+                        else:
+                            # Search+RAG mode: keep search results for RAG processing
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, processing with RAG...'})}\n\n"
                         # print(f"DEBUG: Search completed successfully - context length: {len(search_results)}")  # Debug line
                     
                 except Exception as search_error:
@@ -814,32 +850,55 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                 try:
                     yield f"data: {json.dumps({'type': 'rag_start', 'message': f'Retrieving relevant context ({rag_chunks} chunks)...'})}\n\n"
                     
-                    # TODO: Implement RAG retrieval logic here
-                    # For now, keep the RAG response empty as requested
-                    # Future implementation would:
-                    # 1. Load embeddings from processed text
-                    # 2. Perform similarity search
-                    # 3. Retrieve top chunks
-                    # 4. Format context for LLM
+                    # Import TextRetriever for RAG processing
+                    from RAG import TextRetriever, load_config as load_rag_config
                     
-                    # Placeholder for future RAG implementation
-                    rag_context = ""  # Empty for now as requested
+                    # Load RAG configuration
+                    rag_config = load_rag_config()
                     
-                    if rag_context:
-                        # If RAG context exists, combine it with the message
-                        if search_enabled and final_message != message:
-                            # If both search and RAG are enabled, combine contexts
-                            final_message = f"{final_message}\n\n--- RAG Context ---\n{rag_context}"
+                    # Initialize TextRetriever
+                    retriever = TextRetriever(rag_config)
+                    
+                    if search_enabled and raw_search_data and raw_search_data.get('results'):
+                        # Search+RAG mode: concatenate all search results and send to RAG
+                        yield f"data: {json.dumps({'type': 'rag_processing', 'message': 'Processing search results with RAG...'})}\n\n"
+                        
+                        # Concatenate all raw search content
+                        all_search_content = []
+                        for result in raw_search_data['results']:
+                            all_search_content.append(result['llm_input_chunk'])
+                        
+                        concatenated_search_text = "\n\n".join(all_search_content)
+                        
+                        # Log the concatenated search text length
+                        log_prompt_length("SEARCH_TEXT_FOR_RAG", concatenated_search_text, model or "default")
+                        
+                        # Process the concatenated search text with RAG
+                        await retriever.process_text(concatenated_search_text)
+                        
+                        # Retrieve relevant chunks using the user's query
+                        rag_context = await retriever.retrieve_for_llm(
+                            query=message,
+                            top_k=rag_chunks
+                        )
+                        
+                        if rag_context:
+                            # Combine user message with RAG-retrieved context from search results
+                            final_message = f"{message}\n\n--- Retrieved Context from Search Results ---\n{rag_context}"
+                            
+                            # Log the RAG context length
+                            log_prompt_length("RAG_RETRIEVED_CONTEXT", rag_context, model or "default")
+                            
+                            yield f"data: {json.dumps({'type': 'rag_complete', 'message': f'Retrieved {rag_chunks} relevant chunks from search results, generating response...'})}\n\n"
                         else:
-                            # If only RAG is enabled, use RAG context with original message
-                            final_message = f"{message}\n\n--- Relevant Context ---\n{rag_context}"
-                        
-                        # Log the RAG context length
-                        log_prompt_length("RAG_CONTEXT", rag_context, model or "default")
-                        
-                        yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'Context retrieval complete, generating response...'})}\n\n"
+                            # Fallback to original message if no relevant context found
+                            final_message = message
+                            yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'No relevant context found in search results, proceeding with original query...'})}\n\n"
+                    
                     else:
-                        yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'No relevant context found, proceeding without RAG...'})}\n\n"
+                        # RAG-only mode (no search): this would require pre-processed text
+                        yield f"data: {json.dumps({'type': 'rag_complete', 'message': 'RAG enabled but no search results or pre-processed text available, proceeding without RAG...'})}\n\n"
+                        rag_context = ""
                     
                 except Exception as rag_error:
                     print(f"RAG error: {rag_error}")

@@ -351,6 +351,35 @@ class TextRetriever:
         
         return "\n".join(context_parts)
 
+    async def retrieve_for_llm(self, query: str, top_k: Optional[int] = None, delimiter_template: str = "--- chunk_id:{id} ---") -> str:
+        """
+        Retrieve chunks and return a plain string suitable for LLM input.
+
+        Each chunk is preceded by a delimiter that includes the chunk id (its index in self.chunks).
+
+        Args:
+            query: Search query
+            top_k: Number of chunks to include
+            delimiter_template: Template containing "{id}" placeholder for chunk id
+
+        Returns:
+            Concatenated string of chunk contents with delimiters; empty string if none.
+        """
+        results = await self.retrieve(query, top_k=top_k)
+        if not results:
+            return ""
+
+        parts: List[str] = []
+        for chunk, _sim in results:
+            try:
+                chunk_id = self.chunks.index(chunk)
+            except ValueError:
+                chunk_id = -1
+            parts.append(delimiter_template.format(id=chunk_id))
+            parts.append((chunk.content or "").strip())
+
+        return "\n".join(parts)
+
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
@@ -539,7 +568,9 @@ async def main():
         print(f"\n--- Query: {query} ---")
         
         # Retrieve relevant chunks
-        results = await retriever.retrieve(query, top_k=7)
+        results = await retriever.retrieve(query, top_k=2)
+
+        print(results)
         
         if results:
             print("Retrieved chunks:")
