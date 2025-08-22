@@ -521,20 +521,83 @@ function streamingChatApp() {
             this.$nextTick(() => this.scrollToBottom());
         },
         
+        // Legacy clearChat for backward compatibility
         async clearChat() {
+            await this.clearConversation();
+        },
+
+        async clearConversation() {
             try {
-                await fetch('/clear', { method: 'POST' });
-                this.messages = [];
-                this.messageId = 0;
-                // Reset auto-scroll for new conversation
-                this.autoScrollEnabled = true;
-                this.statusMessage = 'Chat cleared';
-                setTimeout(() => this.statusMessage = 'Ready to chat!', 2000);
+                const sessionId = this.sessionId || 'default-session';
+                const response = await fetch(`/clear-conversation/${sessionId}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    this.messages = [];
+                    this.messageId = 0;
+                    // Reset auto-scroll for new conversation
+                    this.autoScrollEnabled = true;
+                    this.statusMessage = 'Window cleared (context preserved)';
+                    console.log('Clear conversation result:', result);
+                    setTimeout(() => this.statusMessage = 'Ready to chat!', 3000);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
             } catch (error) {
-                console.error('Error clearing chat:', error);
-                this.statusMessage = 'Error clearing chat';
+                console.error('Error clearing conversation:', error);
+                this.statusMessage = 'Error clearing conversation';
+                setTimeout(() => this.statusMessage = 'Ready to chat!', 3000);
             }
         },
+
+        async clearEverything() {
+            // Show confirmation dialog for destructive action
+            const confirmed = confirm(
+                'Clear Conversation?\n\n' +
+                'This will remove:\n' +
+                '• All conversation messages\n' +
+                '• All cached search results\n' +
+                '• All cached RAG contexts\n\n' +
+                'System message will be preserved.\n\n' +
+                'Continue?'
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const sessionId = this.sessionId || 'default-session';
+                const response = await fetch(`/clear-everything/${sessionId}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    this.messages = [];
+                    this.messageId = 0;
+                    // Reset auto-scroll for new conversation
+                    this.autoScrollEnabled = true;
+                    this.statusMessage = 'Conversation cleared (fresh start)';
+                    console.log('Clear everything result:', result);
+                    
+                    setTimeout(() => this.statusMessage = 'Ready to chat!', 3000);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                console.error('Error clearing everything:', error);
+                this.statusMessage = 'Error clearing conversation';
+                setTimeout(() => this.statusMessage = 'Ready to chat!', 3000);
+            }
+        },
+
         
         setupScrollListener() {
             const chatMessages = this.$refs.chatMessages;
@@ -697,6 +760,20 @@ function configPanel() {
                         provider: 'groq',
                         size: '70B', 
                         modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'compound-beta', 
+                        displayName: 'Compound Beta',
+                        provider: 'groq',
+                        size: 'Beta', 
+                        modified_at: 'Available' 
+                    },
+                    { 
+                        name: 'compound-beta-mini', 
+                        displayName: 'Compound Beta Mini',
+                        provider: 'groq',
+                        size: 'Mini', 
+                        modified_at: 'Available' 
                     }
                 ];
                 
@@ -717,6 +794,7 @@ function configPanel() {
                 
                 console.log(`Default model set to: ${this.selectedModel}`);
                 console.log(`Loaded ${this.ollamaModels.length} Ollama models and ${this.groqModels.length} Groq models`);
+                console.log('Groq models:', this.groqModels.map(m => m.name));
                 
             } catch (error) {
                 console.error('Error loading models:', error);
@@ -785,6 +863,20 @@ function configPanel() {
                             provider: 'groq',
                             size: '70B', 
                             modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'compound-beta', 
+                            displayName: 'Compound Beta',
+                            provider: 'groq',
+                            size: 'Beta', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'compound-beta-mini', 
+                            displayName: 'Compound Beta Mini',
+                            provider: 'groq',
+                            size: 'Mini', 
+                            modified_at: 'Available' 
                         }
                     ];
                     
@@ -812,6 +904,20 @@ function configPanel() {
                             displayName: 'DeepSeek R1 Distill Llama 70B',
                             provider: 'groq',
                             size: '70B', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'compound-beta', 
+                            displayName: 'Compound Beta',
+                            provider: 'groq',
+                            size: 'Beta', 
+                            modified_at: 'Available' 
+                        },
+                        { 
+                            name: 'compound-beta-mini', 
+                            displayName: 'Compound Beta Mini',
+                            provider: 'groq',
+                            size: 'Mini', 
                             modified_at: 'Available' 
                         }
                     ];

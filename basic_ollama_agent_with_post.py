@@ -608,8 +608,18 @@ class OllamaChat:
             yield error_msg
 
     def clear_history(self):
-        """Clear the conversation history."""
+        """Clear the conversation history but preserve system message."""
+        # Preserve system message if it exists
+        system_msg = None
+        if self.conversation_history and self.conversation_history[0].get('role') == 'system':
+            system_msg = self.conversation_history[0]
+        
+        # Clear history
         self.conversation_history = []
+        
+        # Restore system message if it existed
+        if system_msg:
+            self.conversation_history.append(system_msg)
     
     def get_history(self) -> List[Dict[str, str]]:
         """Get the current conversation history."""
@@ -811,8 +821,18 @@ class GroqChat:
             yield error_msg
 
     def clear_history(self):
-        """Clear the conversation history."""
+        """Clear the conversation history but preserve system message."""
+        # Preserve system message if it exists
+        system_msg = None
+        if self.conversation_history and self.conversation_history[0].get('role') == 'system':
+            system_msg = self.conversation_history[0]
+        
+        # Clear history
         self.conversation_history = []
+        
+        # Restore system message if it existed
+        if system_msg:
+            self.conversation_history.append(system_msg)
     
     def get_history(self) -> List[Dict[str, str]]:
         """Get the current conversation history."""

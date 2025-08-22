@@ -25,6 +25,7 @@ from bs4 import BeautifulSoup
 import markdown
 from basic_ollama_agent_with_post import OllamaChat, GroqChat
 from search_tool import TavilySearcher
+from context_cache import context_cache, add_search_context, add_rag_context, get_context_for_llm, clear_session_context, get_session_info
 from typing import List, Dict, Optional
 import threading
 import time
@@ -668,8 +669,12 @@ async def chat_stream_sse_v2(chat_request: ChatMessage, model: str = None, sessi
 async def _chat_stream_sse_internal(message: str, model: str = None, session: str = None, search_enabled: bool = False, search_count: int = 5, rag_enabled: bool = False, rag_chunks: int = 5):
     """Internal function for streaming chat responses with configuration support."""
     
+    # Generate session ID if not provided
+    if not session:
+        session = str(uuid.uuid4())
+    
     # Optional debug logging (uncomment for debugging)
-    # print(f"DEBUG: Stream request - search_enabled={search_enabled}, search_count={search_count}, rag_enabled={rag_enabled}, rag_chunks={rag_chunks}, message='{message[:50]}...'")
+    # print(f"DEBUG: Stream request - session={session}, search_enabled={search_enabled}, search_count={search_count}, rag_enabled={rag_enabled}, rag_chunks={rag_chunks}, message='{message[:50]}...'")
     
     async def generate():
         try:
@@ -710,6 +715,15 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                 # Use default agent (Ollama)
                 current_agent = chat_agent if chat_agent else OllamaChat(model=default_model, enable_thinking=True)
             
+            # FIRST: Get any available cached context from previous interactions
+            # This ensures context is available even when search/RAG modes are turned off
+            cached_context = get_context_for_llm(
+                session_id=session,
+                query=message,
+                include_search=True,  # Always try to include if available
+                include_rag=True      # Always try to include if available
+            )
+            
             # Check if search is enabled and perform search if needed
             final_message = message
             raw_search_data = None
@@ -724,7 +738,7 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                         yield f"data: {json.dumps({'type': 'search_error', 'message': 'Search disabled: TAVILY_API_KEY not configured. Proceeding without search...'})}\n\n"
                         # print("DEBUG: Search skipped - no API key")  # Debug line
                     else:
-                        yield f"data: {json.dumps({'type': 'search_start', 'message': f'Searching ({search_count} sites) and thinking...'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'search_start', 'message': 'Searching...'})}\n\n"
                         
                         # Initialize TavilySearcher with config values
                         search_config = config.get('search', {})
@@ -746,6 +760,9 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                                 'query': message,
                                 'results': []
                             }
+                            
+                            # Also prepare data for context cache
+                            search_results_for_cache = []
                             
                             # Special handling when both search and RAG are enabled
                             if rag_enabled:
@@ -779,6 +796,14 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                                             'url': url,
                                             'llm_input_chunk': formatted_chunk  # The exact text sent to RAG
                                         })
+                                        
+                                        # Add to cache storage
+                                        search_results_for_cache.append({
+                                            'url': url,
+                                            'title': title,
+                                            'content': used_content,
+                                            'llm_input_chunk': formatted_chunk
+                                        })
                             else:
                                 # Normal search processing (existing logic)
                                 for i, result in enumerate(raw_search_results.get('results', []), 1):
@@ -810,6 +835,18 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                                             'url': url,
                                             'llm_input_chunk': formatted_chunk  # The exact text sent to LLM for this result
                                         })
+                                        
+                                        # Add to cache storage
+                                        search_results_for_cache.append({
+                                            'url': url,
+                                            'title': title,
+                                            'content': used_content,
+                                            'llm_input_chunk': formatted_chunk
+                                        })
+                        
+                        # Store search results in context cache
+                        if raw_search_data and raw_search_data.get('results'):
+                            add_search_context(session, message, search_results_for_cache)
                         
                         # Only perform direct search for LLM if RAG is NOT enabled
                         if not rag_enabled:
@@ -829,10 +866,10 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                             # Log the search results length before sending to LLM
                             log_prompt_length("SEARCH_CONTEXT", final_message, model or "default")
                             
-                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, generating response...'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Thinking...'})}\n\n"
                         else:
                             # Search+RAG mode: keep search results for RAG processing
-                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Search complete, processing with RAG...'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'search_complete', 'message': 'Thinking...'})}\n\n"
                         # print(f"DEBUG: Search completed successfully - context length: {len(search_results)}")  # Debug line
                     
                 except Exception as search_error:
@@ -883,6 +920,11 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                         )
                         
                         if rag_context:
+                            # Store RAG chunks in context cache
+                            # Extract individual chunks from rag_context for storage
+                            rag_chunks_list = rag_context.split('\n\n') if rag_context else []
+                            add_rag_context(session, message, rag_chunks_list, concatenated_search_text)
+                            
                             # Combine user message with RAG-retrieved context from search results
                             final_message = f"{message}\n\n--- Retrieved Context from Search Results ---\n{rag_context}"
                             
@@ -905,6 +947,20 @@ async def _chat_stream_sse_internal(message: str, model: str = None, session: st
                     yield f"data: {json.dumps({'type': 'rag_error', 'message': f'RAG retrieval failed: {str(rag_error)}. Proceeding without RAG...'})}\n\n"
             # else:
                 # print(f"DEBUG: RAG disabled by user")  # Debug line
+            
+            # Enhance message with cached context if available and no new search/RAG performed
+            if cached_context and not search_enabled and not rag_enabled:
+                enhanced_message = f"{message}\n\n--- Available Context from Previous Interactions ---\n{cached_context}"
+                log_prompt_length("CACHED_CONTEXT", cached_context, model or "default")
+                final_message = enhanced_message
+                yield f"data: {json.dumps({'type': 'context_loaded', 'message': 'Using cached context from previous interactions...'})}\n\n"
+            elif cached_context and (search_enabled or rag_enabled):
+                # If we have both cached and new context, combine them
+                if final_message != message:  # New context was added
+                    final_message = f"{final_message}\n\n--- Additional Context from Previous Interactions ---\n{cached_context}"
+                else:  # Only cached context available
+                    final_message = f"{message}\n\n--- Available Context from Previous Interactions ---\n{cached_context}"
+                yield f"data: {json.dumps({'type': 'context_loaded', 'message': 'Including context from previous interactions...'})}\n\n"
             
             yield f"data: {json.dumps({'type': 'start', 'message': 'Starting response...'})}\n\n"
             
@@ -1332,9 +1388,73 @@ async def chat_regular(chat_message: ChatMessage):
 
 @app.post("/clear")
 async def clear_history():
-    """Clear the chat history."""
-    chat_agent.clear_history()
-    return {"status": "cleared"}
+    """Clear the chat history but preserve system message."""
+    if chat_agent:
+        chat_agent.clear_history()
+    if groq_chat_agent:
+        groq_chat_agent.clear_history()
+    return {"status": "cleared", "message": "Conversation history cleared, system message preserved"}
+
+@app.post("/clear-conversation/{session_id}")
+async def clear_conversation_with_session(session_id: str):
+    """Clear conversation for a specific session but preserve context cache and system message."""
+    global chat_agent, groq_chat_agent
+    
+    # Clear the chat agent history but preserve system message
+    if chat_agent:
+        chat_agent.clear_history()  # clear_history() already preserves system message
+    
+    if groq_chat_agent:
+        groq_chat_agent.clear_history()  # clear_history() already preserves system message
+    
+    # Context cache is preserved - user will still have access to previous search/RAG results
+    return {
+        "status": "success",
+        "message": "Conversation cleared, system message and context preserved",
+        "session_id": session_id
+    }
+
+@app.post("/clear-everything/{session_id}")
+async def clear_everything(session_id: str):
+    """Clear conversation AND context cache, but preserve system message."""
+    # First clear conversation (which preserves system message)
+    await clear_conversation_with_session(session_id)
+    
+    # Then clear context cache
+    clear_session_context(session_id)
+    
+    return {
+        "status": "success", 
+        "message": "Everything cleared - conversation and context. System message preserved.",
+        "session_id": session_id
+    }
+
+@app.get("/context-status/{session_id}")
+async def get_context_status(session_id: str):
+    """Get context cache status for a session."""
+    try:
+        session_info = get_session_info(session_id)
+        cache_stats = context_cache.get_cache_stats()
+        
+        return {
+            "session": session_info,
+            "cache_stats": cache_stats,
+            "status": "success"
+        }
+    except Exception as e:
+        return {
+            "session_id": session_id,
+            "error": str(e),
+            "status": "error"
+        }
+
+@app.get("/cache-stats")
+async def get_cache_stats():
+    """Get comprehensive cache statistics."""
+    try:
+        return context_cache.get_cache_stats()
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/history")
 async def get_history():

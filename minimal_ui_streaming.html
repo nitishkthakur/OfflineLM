@@ -156,9 +156,42 @@
                         ⏹️
                     </button>
                     
-                    <button type="button" class="clear-button" @click="clearChat" :disabled="isLoading">
-                        Clear
-                    </button>
+                    <!-- Clear Options Dropdown -->
+                    <div class="clear-dropdown" x-data="{ clearMenuOpen: false }">
+                        <button 
+                            type="button" 
+                            class="clear-button dropdown-toggle" 
+                            @click="clearMenuOpen = !clearMenuOpen"
+                            :disabled="isLoading"
+                        >
+                            Clear ▼
+                        </button>
+                        <div 
+                            class="clear-dropdown-menu" 
+                            x-show="clearMenuOpen" 
+                            @click.outside="clearMenuOpen = false"
+                            x-transition
+                        >
+                            <button 
+                                type="button" 
+                                class="clear-option"
+                                @click="clearConversation(); clearMenuOpen = false"
+                                :disabled="isLoading"
+                            >
+                                Clear Window
+                                <small>Keep search & context cache</small>
+                            </button>
+                            <button 
+                                type="button" 
+                                class="clear-option clear-everything"
+                                @click="clearEverything(); clearMenuOpen = false"
+                                :disabled="isLoading"
+                            >
+                                Clear Conversation
+                                <small>Remove all context & cache</small>
+                            </button>
+                        </div>
+                    </div>
                 </form>
             </div>
         </div>
@@ -264,6 +297,6 @@
     </div>
 
     <!-- External JavaScript -->
-    <script src="/static/script.js"></script>
+    <script src="/static/script.js?v=1755850763"></script>
 </body>
 </html>

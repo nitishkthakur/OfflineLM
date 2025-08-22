@@ -10,3 +10,4 @@ groq>=0.31.0
 python-dotenv>=1.0.0
 tavily-python>=0.4.0
 pyyaml>=6.0.0
+cachetools>=5.0.0
