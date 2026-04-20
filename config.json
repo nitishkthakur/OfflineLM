@@ -1,0 +1,36 @@
+{
+  "default_model": "qwen3.5:4b",
+  "default_backend": "react_agent",
+  "recursion_limit": 50,
+  "ollama_base_url": "http://localhost:11434",
+  "code_execution": {
+    "enabled": true,
+    "timeout_seconds": 30,
+    "max_output_chars": 10000,
+    "idle_kill_minutes": 10,
+    "sandbox_venv": ".sandbox-venv",
+    "packages": ["ipykernel", "pandas", "numpy", "scipy", "scikit-learn", "openpyxl", "matplotlib", "requests"]
+  },
+  "deep_agent": {
+    "summarization_model": "qwen3.5:4b",
+    "subagent_default_model": null,
+    "general_purpose_agent": true,
+    "recursion_limit": 250,
+    "subagents": [
+      {
+        "name": "researcher",
+        "include": true,
+        "description": "Use for open-ended research: gather information via internet_search, read saved artifacts, and return a concise synthesis with sources.",
+        "prompt": "You are a focused research subagent. Use the internet_search tool liberally to gather primary sources. For numeric or financial figures, verify across at least two sources before citing. Return a terse, sourced synthesis — no fluff, no restating the question. End with a 'Sources:' bulleted list of URLs.",
+        "model": null
+      },
+      {
+        "name": "critic",
+        "include": true,
+        "description": "Use to pressure-test an analysis, answer, or plan. Identifies weak assumptions, missing considerations, arithmetic slips, and unsupported claims.",
+        "prompt": "You are a precise critic. Given a draft answer or analysis, identify: (1) unsupported assumptions, (2) arithmetic errors (use the calculate tool to verify), (3) missing edge cases, (4) alternative framings. Be direct and specific — cite the exact sentence or figure you're challenging. Do not rewrite the draft; only critique it. Finish with a numbered list of the 3-5 most important issues to fix.",
+        "model": null
+      }
+    ]
+  }
+}
