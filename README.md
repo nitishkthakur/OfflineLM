@@ -1,95 +1,145 @@
-# Jarvis
+# OfflineLM (Jarvis)
 
-A full-featured AI agent chat application built using the `create_deep_agent` function from the `deepagents` langchain package. Features a ChatGPT-like interface with streaming responses, markdown rendering, file upload, web search, and more.
+A full-featured AI agent chat application supporting local Ollama models alongside cloud providers (Groq, OpenAI, Anthropic). Features a ChatGPT-style interface with streaming responses, deep agent reasoning, sandboxed Python code execution, web search, and PDF support.
 
 ## Features
 
-- Multi-model support (Claude, GPT, Groq models)
-- Streaming responses with real-time updates
-- Markdown rendering with code highlighting and LaTeX equations
-- PDF file upload with text and image extraction
-- Web search via Tavily
-- Artifact saving to disk
-- Conversation export as PDF
-- Dark theme professional interface
+- **Local-first**: Run entirely offline with [Ollama](https://ollama.com) models
+- **Cloud providers**: Groq, OpenAI, Anthropic (optional — set API keys in `.env`)
+- **Deep Agent mode**: Multi-step reasoning with researcher + critic subagents
+- **Sandboxed Python execution**: Persistent Jupyter-style kernel with numpy, pandas, scipy, scikit-learn, matplotlib, requests
+- **Web search**: Tavily-powered search with configurable result count
+- **PDF support**: Upload PDFs — text extraction + vision multimodal (for capable models)
+- **Streaming responses** with real-time thought trace sidebar
+- **Conversation export** as PDF
 
-## Setup
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.11+
-- poppler-utils (for PDF to image conversion)
+- [Ollama](https://ollama.com) installed and running locally (`ollama serve`)
+- `poppler-utils` — required for PDF-to-image conversion:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install poppler-utils
 
-### Installation
+  # macOS
+  brew install poppler
+  ```
 
-1. Install backend dependencies:
+## Quick Start
+
+### 1. Clone and set up the backend
 
 ```bash
-cd backend
-pip install -r requirements.txt
+git clone https://github.com/nitishkthakur/OfflineLM.git
+cd OfflineLM
+
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
 ```
 
-2. Create a `.env` file in the `devin_app` directory with your API keys:
+### 2. Configure environment variables
 
 ```bash
 cp .env.example .env
-# Edit .env with your actual API keys
+# Edit .env — only add keys for providers you want to use
 ```
 
-Required environment variables:
-- `ANTHROPIC_API_KEY` - For Claude models
-- `OPENAI_API_KEY` - For GPT models
-- `GROQ_API_KEY` - For Groq models
-- `TAVILY_API_KEY` - For web search
+Key variables (all optional except for cloud model usage):
 
-### Running the Application
+| Variable | Purpose |
+|---|---|
+| `OLLAMA_BASE_URL` | Ollama endpoint (default: `http://localhost:11434`) |
+| `GROQ_API_KEY` | Groq cloud models |
+| `OPENAI_API_KEY` | OpenAI GPT models |
+| `ANTHROPIC_API_KEY` | Anthropic Claude models |
+| `TAVILY_API_KEY` | Web search (required for search toggle) |
 
-1. Start the backend server:
+### 3. Start the app
+
+**Option A — one command (recommended):**
 
 ```bash
+chmod +x start.sh
+./start.sh
+```
+
+This starts the backend on `:8000` and frontend on `:3000`, then opens your browser automatically.
+
+**Option B — manually:**
+
+```bash
+# Terminal 1 — backend
 cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+source .venv/bin/activate
+python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2 — frontend
+cd frontend
+python3 -m http.server 3000
 ```
 
-2. Open the frontend in a browser:
+Then open **http://localhost:3000** in your browser.
+
+### 4. Pull a model in Ollama
 
 ```bash
-cd frontend
-# Open index.html in a browser, or serve it with a simple HTTP server:
-python -m http.server 3000
+ollama pull qwen3.5:4b       # default model (fast, 4B params)
+ollama pull gemma4:26b       # larger, more capable
+ollama pull qwen2-vl:7b      # vision-capable model
 ```
-
-3. Navigate to `http://localhost:3000` in your browser.
 
 ## Configuration
 
-The `config.json` file contains the list of available models. You can modify this file to add or remove models.
+`config.json` controls defaults:
+
+```json
+{
+  "default_model": "qwen3.5:4b",
+  "default_backend": "react_agent",
+  "ollama_base_url": "http://localhost:11434",
+  "code_execution": {
+    "enabled": true,
+    "timeout_seconds": 30,
+    "packages": ["pandas", "numpy", "scipy", "scikit-learn", "matplotlib", "requests", "openpyxl"]
+  }
+}
+```
 
 ## Project Structure
 
 ```
-devin_app/
+OfflineLM/
 ├── backend/
-│   ├── main.py          # FastAPI backend with agent implementation
-│   └── requirements.txt # Python dependencies
+│   ├── main.py              # FastAPI app + API routes
+│   ├── agents/
+│   │   ├── react_agent.py   # Default single-agent mode
+│   │   └── deep_agent.py    # Multi-step deep research agent
+│   ├── sandbox.py           # Python execution sandbox manager
+│   ├── sandbox_runner.py    # In-jail kernel loop
+│   ├── tools.py             # Tool definitions (search, code exec, artifacts)
+│   └── requirements.txt
 ├── frontend/
-│   ├── index.html       # Main HTML file
-│   ├── styles.css       # Dark theme CSS
-│   └── app.js           # Frontend JavaScript
-├── artifacts/           # Saved artifacts directory
-├── config.json          # Model configuration
-├── .env.example         # Environment variables template
-└── README.md            # This file
+│   ├── index.html
+│   ├── app.js
+│   └── styles.css
+├── config.json              # App configuration
+├── .env.example             # Environment variable template
+└── start.sh                 # One-command startup script
 ```
 
 ## API Endpoints
 
-- `GET /models` - Get available models
-- `POST /chat` - Send a message (streaming response)
-- `POST /upload` - Upload a PDF file
-- `POST /download-pdf` - Download conversation as PDF
-- `GET /artifacts` - List saved artifacts
-- `GET /artifacts/{filename}` - Get artifact content
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/models` | List available Ollama models |
+| `POST` | `/chat` | Send a message (SSE streaming) |
+| `POST` | `/upload` | Upload a PDF |
+| `GET` | `/model-info/{model_id}` | Model capabilities (vision, tools, thinking) |
+| `GET` | `/artifacts` | List saved artifacts |
+| `GET` | `/artifacts/{filename}` | Get artifact content |
+| `POST` | `/download-pdf` | Export conversation as PDF |
 
 ## License
 
