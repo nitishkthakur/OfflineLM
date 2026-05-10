@@ -268,7 +268,7 @@ class DeepAgentBackend(AgentBackend):
 
         agent = create_agent(
             main_model,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=backend_config.get("system_prompt", SYSTEM_PROMPT),
             tools=lc_tools,
             middleware=main_middleware,
         )

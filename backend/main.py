@@ -22,7 +22,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfgen import canvas as _rl_canvas
 
-from tools import make_tools
+from tools import make_tools, build_system_prompt
 import agents as agent_registry
 from sandbox import SandboxRegistry, ensure_sandbox_venv, bwrap_path
 
@@ -43,6 +43,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 UPLOADS_DIR = BASE_DIR / "uploads"
 EXPORTS_DIR = BASE_DIR / "exports"
+USER_MEMORY_PATH = BASE_DIR / "user_memory.md"
 
 ARTIFACTS_DIR.mkdir(exist_ok=True)
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -207,6 +208,23 @@ async def get_backends():
     }
 
 
+@app.get("/ui-defaults")
+async def get_ui_defaults():
+    """Return UI generation-panel defaults from the ui_defaults section of config.json."""
+    d = load_config().get("ui_defaults", {})
+    return {
+        "temperature":          d.get("temperature",          0.8),
+        "num_ctx":              d.get("num_ctx",              10240),
+        "num_predict":          d.get("num_predict",          -1),
+        "thinking":             d.get("thinking",             False),
+        "web_search":           d.get("web_search",           False),
+        "pdf_vision":           d.get("pdf_vision",           True),
+        "search_results_count": d.get("search_results_count", 5),
+        "sandbox_network":      d.get("sandbox_network",      False),
+        "memory_enabled":       d.get("memory_enabled",       True),
+    }
+
+
 # ── Model info / capabilities ──────────────────────────────────────────────────
 
 @app.get("/model-info/{model_id:path}")
@@ -268,6 +286,7 @@ class ChatRequest(BaseModel):
     backend_config: dict = {}
     ollama_options: dict = {}   # num_predict, num_ctx, temperature, reasoning
     allow_network: bool = False # Python sandbox network access (frontend toggle)
+    memory_enabled: bool = True # Load user memory into system prompt
     # Multimodal content blocks (text + image_url).  When set, used for storage
     # and sent to the model instead of `message`.  `message` is kept only as the
     # display label for history titles / PDF export header.
@@ -305,6 +324,19 @@ async def chat(request: ChatRequest):
         config = load_config()
         code_exec_cfg = config.get("code_execution", {}) or {}
         registry = _get_sandbox_registry()
+
+        # Build the runtime system prompt (date + custom instructions + user memory)
+        user_memory_content = ""
+        if request.memory_enabled and USER_MEMORY_PATH.exists():
+            try:
+                user_memory_content = USER_MEMORY_PATH.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+        system_prompt = build_system_prompt(
+            custom_instructions=config.get("custom_instructions", ""),
+            user_memory_content=user_memory_content,
+        )
+
         tools = make_tools(
             ARTIFACTS_DIR,
             request.web_search_enabled,
@@ -312,6 +344,8 @@ async def chat(request: ChatRequest):
             sandbox_registry=registry,
             allow_network=bool(request.allow_network),
             code_exec_config=code_exec_cfg,
+            memory_enabled=request.memory_enabled,
+            memory_path=USER_MEMORY_PATH,
         )
 
         # Resolve recursion_limit from config if not overridden
@@ -327,6 +361,8 @@ async def chat(request: ChatRequest):
 
         # Pass ollama generation options through to the agent
         merged_config["ollama_options"] = request.ollama_options
+        # Pass the fully-built system prompt so both backends use it
+        merged_config["system_prompt"] = system_prompt
 
         messages = [
             {"role": msg["role"], "content": msg["content"]}

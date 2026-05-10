@@ -1,18 +1,30 @@
 {
-  "default_model": "qwen3.5:4b",
+  "default_model": "minimax-m2.7:cloud",
   "default_backend": "react_agent",
   "recursion_limit": 50,
+  "custom_instructions": "",
+  "ui_defaults": {
+    "temperature": 0.8,
+    "num_ctx": 100000,
+    "num_predict": 20480,
+    "thinking": true,
+    "web_search": true,
+    "pdf_vision": true,
+    "search_results_count": 5,
+    "sandbox_network": false,
+    "memory_enabled": true
+  },
   "ollama_base_url": "http://localhost:11434",
   "code_execution": {
     "enabled": true,
     "timeout_seconds": 30,
     "max_output_chars": 10000,
-    "idle_kill_minutes": 10,
+    "idle_kill_minutes": 2,
     "sandbox_venv": ".sandbox-venv",
     "packages": ["ipykernel", "pandas", "numpy", "scipy", "scikit-learn", "openpyxl", "matplotlib", "requests"]
   },
   "deep_agent": {
-    "summarization_model": "qwen3.5:4b",
+    "summarization_model": "minimax-m2.7:cloud",
     "subagent_default_model": null,
     "general_purpose_agent": true,
     "recursion_limit": 250,

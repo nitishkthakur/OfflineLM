@@ -5,6 +5,7 @@ import math
 import operator
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -68,6 +69,25 @@ When a user attaches an Excel or CSV file, the data is wrapped in a tag of the f
   spreadsheet values — never compute figures inline.
 
 Be helpful, accurate, and thorough in your responses."""
+
+
+def build_system_prompt(
+    custom_instructions: str = "",
+    user_memory_content: str = "",
+) -> str:
+    """Assemble the full runtime system prompt: base + today's date + custom instructions + user memory."""
+    today = date.today().strftime("%B %d, %Y")
+    parts = [SYSTEM_PROMPT]
+    parts.append(f"\n\n## Today's Date\nToday is {today}.")
+    if custom_instructions and custom_instructions.strip():
+        parts.append(f"\n\n## Custom Instructions\n{custom_instructions.strip()}")
+    if user_memory_content and user_memory_content.strip():
+        parts.append(
+            f"\n\n## User Memory\n"
+            f"The following facts about the user were remembered from previous conversations:\n"
+            f"{user_memory_content.strip()}"
+        )
+    return "".join(parts)
 
 
 # ── Safe AST-based expression evaluator ───────────────────────────────────────
@@ -315,6 +335,8 @@ def make_tools(
     sandbox_registry=None,
     allow_network: bool = False,
     code_exec_config: Optional[dict] = None,
+    memory_enabled: bool = False,
+    memory_path: Optional[Path] = None,
 ) -> list:
     """Return a list of LangChain-compatible tool functions for the given request context.
 
@@ -648,5 +670,59 @@ def make_tools(
         """
 
         tools_list.append(python_execute)
+
+    # ── User memory tools (optional) ──────────────────────────────────────────
+    if memory_enabled and memory_path is not None:
+        def save_user_memory(fact: str) -> str:
+            """Append a remembered fact about the user to the persistent user memory file. The fact can be deduced across user questions that create a user personality.
+
+            ## When to use
+            - The user reveals something personal that is worth remembering across
+              conversations: their job, goals, hobbies, preferences, name, location,
+              or any recurring context they have shared (e.g. "I am preparing for DS
+              interviews", "I follow arm wrestling", "I prefer concise answers").
+            - Only call this for genuinely new, lasting facts — not for transient
+              details like a one-off question topic.
+            - Each call adds exactly one line; keep ``fact`` to a single clear
+              sentence (e.g. "The user is preparing for data science interviews.", "The user loves Kevin murphy books", "The user is interested in Jungian Psychology").
+            - The user said something that helps build his profile for future conversations.
+            
+            ## When NOT to use
+            - For information already in the memory file — avoid duplicates.
+            - For temporary request details that have no long-term relevance.
+
+            For example following are areas where to call the memory tool:
+             - USER: I love data science - Can you suggest books which are the equivalent of the DEEP LEARNING - by goodfellow but in different aspects of Data Science. <memorysaved>User loves Data science, Ian Goodfellows book and is interested in other similar top DS Books</memorysaved>
+             - USER: I follow arm wrestling - Can you suggest training routines or competitions? <memorysaved>User follows arm wrestling</memorysaved>
+
+            When NOT to call the memory tool:
+             - USER: What is the revenue of Apple in 2023?
+             - USER: Latest news about country
+            Args:
+                fact: A single concise sentence describing the fact to remember.
+            """
+            entry = f"- [{date.today().isoformat()}] {fact.strip()}\n"
+            with open(memory_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+            return f"Memory saved: {fact.strip()}"
+
+        def read_user_memory() -> str:
+            """Read all facts currently stored in the user memory file.
+
+            ## When to use
+            - When you want to recall what is already known about the user before
+              deciding whether to call save_user_memory (to avoid duplicates).
+            - When personalising a response based on the user's known context.
+
+            ## Returns
+            The full contents of the memory file as a string, or a notice that
+            no memory has been saved yet.
+            """
+            if not memory_path.exists():
+                return "No user memory saved yet."
+            content = memory_path.read_text(encoding="utf-8").strip()
+            return content if content else "No user memory saved yet."
+
+        tools_list.extend([save_user_memory, read_user_memory])
 
     return tools_list

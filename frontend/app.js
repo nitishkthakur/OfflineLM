@@ -12,11 +12,13 @@ let conversations = {}; // In-memory store of all conversations
 // ── Generation / Ollama options ─────────────────────────────────────────────
 // Mirrors what the user has set in the Generation panel.
 // Values are sent with every /chat request and apply from the next turn onward.
+// _defaults is populated at startup from GET /ui-defaults (config.json).
+let _defaults = { temperature: 0.8, num_ctx: 10240, num_predict: -1 };
 let ollamaOptions = {
     reasoning:   false,   // send reasoning=False unless model supports it and toggle is on
-    temperature: 0.8,     // Ollama default
-    num_ctx:     10240,   // app default (Ollama default 2048 is too small for attachments)
-    num_predict: -1,      // -1 = unlimited (Ollama default in v0.5+)
+    temperature: _defaults.temperature,
+    num_ctx:     _defaults.num_ctx,
+    num_predict: _defaults.num_predict,
 };
 let modelSupportsThinking  = false;   // updated on every model change
 
@@ -37,9 +39,9 @@ function syncGenOptions() {
 
     ollamaOptions = {
         reasoning:   modelSupportsThinking && thinkOn ? true : false,
-        temperature: isNaN(temp)    ? 0.8   : temp,
-        num_ctx:     isNaN(numCtx)  ? 10240 : numCtx,
-        num_predict: isNaN(numPred) ? -1    : numPred,
+        temperature: isNaN(temp)    ? _defaults.temperature : temp,
+        num_ctx:     isNaN(numCtx)  ? _defaults.num_ctx     : numCtx,
+        num_predict: isNaN(numPred) ? _defaults.num_predict  : numPred,
     };
 
     updateContextBar();  // num_ctx change affects effective total
@@ -838,6 +840,7 @@ async function sendMessage() {
             backend_config:     currentBackendConfig,
             ollama_options:     effectiveOllamaOptions,
             allow_network:      !!(document.getElementById('sandbox-network-toggle')?.checked),
+            memory_enabled:     !!(document.getElementById('user-memory-toggle')?.checked),
         };
         if (messageContent) reqBody.message_content = messageContent;
 
@@ -1667,8 +1670,68 @@ function getCurrentMessages() {
     return messages;
 }
 
+/**
+ * Fetch UI defaults from GET /ui-defaults (config.json → ui_defaults) and
+ * apply them to all generation-panel form elements.
+ * Fails gracefully — HTML value attributes serve as last-resort defaults.
+ */
+async function applyUiDefaults() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/ui-defaults`);
+        if (!resp.ok) return;
+        const d = await resp.json();
+
+        // Update module-level defaults so syncGenOptions() fallbacks are also correct
+        if (d.temperature != null) _defaults.temperature = d.temperature;
+        if (d.num_ctx     != null) _defaults.num_ctx     = d.num_ctx;
+        if (d.num_predict != null) _defaults.num_predict = d.num_predict;
+
+        // Apply numeric inputs
+        const tempEl  = document.getElementById('gen-temperature');
+        const ctxEl   = document.getElementById('gen-num-ctx');
+        const predEl  = document.getElementById('gen-num-predict');
+        const srCount = document.getElementById('search-results-count');
+        if (tempEl)  tempEl.value  = d.temperature;
+        if (ctxEl)   ctxEl.value   = d.num_ctx;
+        if (predEl)  predEl.value  = d.num_predict;
+        if (srCount) srCount.value = d.search_results_count;
+
+        // Web search toggle + show/hide results-count row
+        const wsToggle = document.getElementById('web-search-toggle');
+        if (wsToggle) {
+            wsToggle.checked = d.web_search ?? false;
+            const wrap = document.getElementById('search-count-wrap');
+            if (wrap) {
+                wrap.style.opacity      = wsToggle.checked ? '1' : '0.38';
+                wrap.style.pointerEvents = wsToggle.checked ? 'auto' : 'none';
+            }
+        }
+
+        // PDF-vision toggle (also updates pdfVisionEnabled module variable)
+        const pvToggle = document.getElementById('pdf-vision-toggle');
+        if (pvToggle) {
+            pvToggle.checked = d.pdf_vision ?? true;
+            pdfVisionEnabled = pvToggle.checked;
+        }
+
+        // Sandbox network toggle
+        const snToggle = document.getElementById('sandbox-network-toggle');
+        if (snToggle) snToggle.checked = d.sandbox_network ?? false;
+
+        // User memory toggle
+        const memToggle = document.getElementById('user-memory-toggle');
+        if (memToggle) memToggle.checked = d.memory_enabled ?? true;
+
+        // Sync ollamaOptions from the freshly-set form values
+        syncGenOptions();
+    } catch (e) {
+        console.warn('[ui-defaults] Could not load from config, using HTML defaults:', e);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // Models are loaded by Alpine.js modelCombobox on init
     loadConversationsFromStorage();
     renderChatHistory();
+    applyUiDefaults();
 });

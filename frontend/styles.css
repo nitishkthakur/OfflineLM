@@ -44,11 +44,11 @@
 
     --sw: 262px;
 
-    --font-display: 'Syne', sans-serif;
-    --font-ui:      'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font:         'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-ui:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-reading: 'Lora', Georgia, 'Times New Roman', serif;
-    --mono:         'IBM Plex Mono', 'SF Mono', 'Cascadia Code', monospace;
+    --mono:         'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
 }
 
 /* ── BASE RESET ─────────────────────────────────────── */

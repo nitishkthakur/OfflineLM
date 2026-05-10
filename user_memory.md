@@ -1,0 +1,1 @@
+- [2026-05-09] The user is a data science enthusiast who reads reference-level texts — they know Goodfellow's Deep Learning and want the equivalent "bible" for other DS domains.

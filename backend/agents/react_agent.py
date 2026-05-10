@@ -190,7 +190,7 @@ class ReactAgentBackend(AgentBackend):
         agent = create_agent(
             model=model,
             tools=lc_tools,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=backend_config.get("system_prompt", SYSTEM_PROMPT),
         )
 
         step_count     = 0
